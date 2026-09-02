@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -170,27 +169,12 @@ func (R *GSRuntime) Init() {
     +-+-+-+-+-+-+-+-+-+-+`
 	fmt.Println(startuptext)
 
-	// kill process on port 53
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command("netstat", "-ano", "|", "findstr", "53")
-		out, err := cmd.Output()
-		if err != nil {
-			log.Println(err.Error())
-		}
-		log.Println(string(out))
-	} else {
-		cmd := exec.Command("lsof", "-i", ":53")
-		out, err := cmd.Output()
-		if err != nil {
-			log.Println(err.Error())
-		}
-		log.Println(string(out))
-	}
-
 	InitTasks()
 	R.MemLogSz = 1024
 	R.MemLog = make([]GSFilterLog, R.MemLogSz)
-	R.DnsServerInfo = &GatesentryTypes.DnsServerInfo{}
+	if R.DnsServerInfo == nil {
+		R.DnsServerInfo = &GatesentryTypes.DnsServerInfo{}
+	}
 
 	// Clear and reload filters in-place to preserve webserver's pointer reference
 	log.Printf("[RELOAD] Before reload: %d filters\n", len(R.Filters))
@@ -203,9 +187,17 @@ func (R *GSRuntime) Init() {
 	}
 	R.AuthUsers = []GatesentryTypes.GSUser{}
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
-	log.Println("Making a new MapStore for GSSettings")
-	R.GSSettings = gatesentry2storage.NewMapStore("GSSettings", true)
-	R.GSUpdateLog = gatesentry2storage.NewMapStore("GSUpdateLog", false)
+	if R.GSSettings == nil {
+		log.Println("Making a new MapStore for GSSettings")
+		R.GSSettings = gatesentry2storage.NewMapStore("GSSettings", true)
+	} else {
+		R.GSSettings.Reload()
+	}
+	if R.GSUpdateLog == nil {
+		R.GSUpdateLog = gatesentry2storage.NewMapStore("GSUpdateLog", false)
+	} else {
+		R.GSUpdateLog.Reload()
+	}
 	R.GSSettings.SetDefault("strictness", "2000")
 	R.GSSettings.SetDefault("general_settings", "{\"log_location\": \"./log.db\", \"admin_password\": \"admin\", \"admin_username\": \"admin\" }")
 	R.GSSettings.SetDefault("blocktimes", "{\"fromhours\":0,\"tohours\":0,\"fromminutes\":58,\"tominutes\":59}")
@@ -215,7 +207,12 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("NonAlives", "0")
 	R.GSSettings.SetDefault("Noheartbeat", "0")
 	R.GSSettings.SetDefault("Noheartbeatmessage", "")
-	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
+	if tz := os.Getenv("TZ"); tz != "" {
+		log.Printf("[CONFIG] Timezone from TZ env: %s", tz)
+		R.GSSettings.Update("timezone", tz)
+	} else {
+		R.GSSettings.SetDefault("timezone", "UTC")
+	}
 	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
 	R.GSSettings.SetDefault("enable_dns_filtering", "true")
@@ -236,6 +233,16 @@ func (R *GSRuntime) Init() {
 		R.GSSettings.Update("dns_resolver", dnsResolverValue)
 	} else {
 		R.GSSettings.SetDefault("dns_resolver", "8.8.8.8:53")
+	}
+	if envResolver6 := os.Getenv("GATESENTRY_DNS_RESOLVER_IPV6"); envResolver6 != "" {
+		dnsResolver6 := envResolver6
+		if _, _, err := net.SplitHostPort(envResolver6); err != nil {
+			dnsResolver6 = net.JoinHostPort(envResolver6, "53")
+		}
+		log.Printf("[DNS] Using IPv6 resolver from environment (overrides settings): %s", dnsResolver6)
+		R.GSSettings.Update("dns_resolver_ipv6", dnsResolver6)
+	} else {
+		R.GSSettings.SetDefault("dns_resolver_ipv6", "[fd00:1234:5678::1]:53")
 	}
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")

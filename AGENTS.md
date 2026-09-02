@@ -2,47 +2,93 @@
 
 Important context for AI agents working on this project.
 
+## Branch
+
+- **Active development is `v2`** (this checkout tracks `myfork/v2`). Do not treat origin/master or v1.20.x / "1.2" as the working tree.
+- Upstream: `origin` = https://github.com/fifthsegment/Gatesentry.git
+- Fork: `myfork` = https://github.com/jbarwick/Gatesentry.git
+- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.1`). Production on monster-jj may still be `2.0.0-alpha.15` until the beta image is published.
+
+## Which tree to use for deployments
+
+| Location | What it is | Use for |
+|----------|------------|---------|
+| **This repo (`Gatesentry`, branch `v2`)** | Application source, Dockerfile, tests, `docker-publish.sh` | All code, image builds, v2 features (`2.0.0-beta.1`) |
+| **`../gatesentry-synology`** | One-file Synology compose overlay | NAS-specific volume/network/env. Synced to `2.0.0-beta.1` + `GATESENTRY_DNS_RESOLVER`. |
+| **`/volume1/docker/Gatesentry/` on monster-jj** | Live production compose + data volume | Actual deploy. Last running image was `2.0.0-alpha.15`; bump to `2.0.0-beta.1` after publish. |
+
+**Use this v2 project to build and publish images. Deploy with the NAS compose (host network, port 53, admin 9876, data on `/volume1/docker/Gatesentry/gatesentry`), not with this repo's default `docker-compose.yml` (bridged ports, admin 8080).** After publishing a new image, update the image tag in `/volume1/docker/Gatesentry/docker-compose.yml` (and sync `../gatesentry-synology` so it does not drift back to 1.20.6.1).
+
+## Deployment Target
+
+- **Production/target server**: `monster-jj` — Synology DS1618+, SSH as root: `ssh root@monster-jj`
+- **Docker runs on monster-jj**, NOT on the local development machine
+- To check logs, containers, or service health: `ssh root@monster-jj` first, then use `docker` commands
+- The local machine is **development only** — the GateSentry binary does not run locally in normal workflow
+- **PATH on monster-jj**: `export PATH=$PATH:/usr/local/bin:/usr/bin` (docker is `/usr/local/bin/docker`)
+- Compose project: `/volume1/docker/Gatesentry/docker-compose.yml`
+- Data: `/volume1/docker/Gatesentry/gatesentry/` (`GSSettings`, `log.db`, `devices.json`, `filterfiles/`)
+
 ## Project Structure
 
 - **Go backend** — Multi-module workspace (`go.work`): root (`gatesentrybin`), `./application`, `./gatesentryproxy`
 - **Svelte frontend** — In `ui/` directory (Svelte 4, Vite 4, Carbon Components Svelte)
 - **Embedded UI** — The built UI is copied into `application/webserver/frontend/files/` and embedded in the Go binary
+- **`gatesentryproxy` is Go 1.17** — range-loop variable pointers (`&item` in `for _, item := range`) are still a bug there
 
 ## Build & Run
 
 - **Build everything** (UI + Go binary): `./build.sh`
-- **Restart the running server** (does NOT rebuild): `./restart.sh`
-- **Typical workflow**: Edit code → `./build.sh` → `./restart.sh`
+- **Restart the running server** (does NOT rebuild): `./restart.sh` (local/dev only)
+- **Publish image to Nexus on monster-jj**: `./docker-publish.sh --nexus --version <ver>`
+- **Typical v2 production workflow**: Edit on `v2` → `./build.sh` → `./docker-publish.sh --nexus --version …` → on NAS, bump the compose image tag → `docker compose up -d`
 - The Go binary is output to `bin/gatesentrybin`
 - The server runs from the `bin/` directory (working dir matters for data paths)
-- Log output goes to `log.txt`
-- **Deep test DNS & proxy**: `scripts/dns_deep_test.sh` — fully tests and retests DNS services and proxy
-- **Deep test proxy**: `scripts/proxy_deep_tests.sh` — comprehensive proxy filtering, MITM, and content pipeline tests
-- **full unittest**: `make tests` -- run all unit tests
+- Log output goes to `log.txt` locally; on the NAS use `docker logs gatesentry`
+- **Deep test DNS & proxy**: `scripts/dns_deep_test.sh`
+- **Deep test proxy**: `scripts/proxy_deep_tests.sh`
+- **full unittest**: `make tests`
 
 ### Proxy Deep Tests — State Management
 
-`scripts/proxy_deep_tests.sh` saves and restores the server's full state (rules, settings, keyword filters) around each test run. During setup, **all existing proxy rules are deleted** so only the test-created rules (`PT: ...` prefixed) are active — this ensures deterministic results regardless of what rules the admin has configured. On exit (including Ctrl-C), all rules are deleted and the original saved rules are re-created.
+`scripts/proxy_deep_tests.sh` saves and restores the server's full state (rules, settings, keyword filters) around each test run. During setup, **all existing proxy rules are deleted** so only the test-created rules (`PT: ...` prefixed) are active. On exit (including Ctrl-C), all rules are deleted and the original saved rules are re-created.
 
 ## Ports
+
+Defaults in this repo (local `docker-compose.yml` / `run.sh`):
 
 | Service       | Default Port | Environment Variable       |
 |---------------|-------------|---------------------------|
 | Admin UI      | **8080**    | `GS_ADMIN_PORT`           |
 | DNS server    | **10053**   | `GATESENTRY_DNS_PORT`     |
 | Proxy server  | **10413**   | (see proxy config)        |
+| Transparent   | **10414**   | `GS_TRANSPARENT_PROXY_PORT` |
+| Metrics       | **same as admin** | `/metrics` on the admin HTTP server (no extra port) |
+
+**Production on monster-jj** (`network_mode: host`):
+
+| Service    | Port | Notes |
+|------------|------|--------|
+| Admin UI   | **9876** | **`http://monster-jj:9876/gatesentry/`** (`GS_BASE_PATH=/gatesentry`). Root `http://monster-jj:9876/` 302s there. **Do not use `monster-jj.jvj28.com`** — nginx on :80/:443 redirects that FQDN to HTTPS and never reaches GateSentry. |
+| Metrics    | **9876** | `http://monster-jj:9876/metrics` (unauthenticated, same listener) |
+| DNS        | **53**   | `GATESENTRY_DNS_PORT=53` — `dig @monster-jj -p 53 example.com` |
+| Proxy      | **10413** | |
+| Transparent| **10414** | |
+
+Do **not** document metrics as a separate service on 9876. 9876 is the admin port in production; metrics share it.
 
 ## Environment Variables
 
-See `run.sh` and `restart.sh` for the full set of environment variables and their defaults:
+See `run.sh` and `restart.sh` for the full set. Important ones:
 
-- `GATESENTRY_DNS_ADDR` — DNS listen address (default: `::`) tcp6 stack
+- `GATESENTRY_DNS_ADDR` — DNS listen address (default: `::` locally; production `0.0.0.0`)
 - `GATESENTRY_DNS_PORT` — DNS listen port (default: `10053`)
-- `GATESENTRY_DNS_RESOLVER` — Upstream DNS resolver (default: `192.168.1.1:53`)
-- `GS_ADMIN_PORT` — Admin web UI port (default: `8080`)
+- `GATESENTRY_DNS_RESOLVER` — Upstream DNS resolver. **On `Init()`, a non-empty value overwrites stored `dns_resolver`.** Use this to recover when the saved resolver is unreachable.
+- `GS_ADMIN_PORT` — Admin web UI port (default `8080`; production `9876`)
+- `GS_BASE_PATH` — URL prefix (default `/gatesentry`; production `/gatesentry`)
 - `GS_MAX_SCAN_SIZE_MB` — Max content scan size (default: `2`)
 
-## ⚠️ curl / HTTP Requests
+## curl / HTTP Requests
 
 **IMPORTANT**: The development machine has `http_proxy` set to the GateSentry proxy (`http://monster-jj:10413`). Any `curl` or HTTP request from the terminal will be routed through the proxy unless you bypass it.
 
@@ -56,7 +102,9 @@ curl --noproxy '*' http://localhost:8080/api/about
 curl http://localhost:8080/api/about
 ```
 
-Without `--noproxy '*'`, requests hit the GateSentry proxy on port 10413 instead of the admin UI on port 8080, producing misleading errors (400, 508, etc.).
+Without `--noproxy '*'`, requests hit the GateSentry proxy on port 10413 instead of the admin UI, producing misleading errors (400, 508, etc.).
+
+Admin URL on the LAN: **`http://monster-jj:9876/gatesentry/`** (or `http://192.168.1.91:9876/gatesentry/`). Avoid `monster-jj.jvj28.com` (HTTPS redirect on 80/443). When DNS or the proxy is unhealthy, use the IP and `--noproxy '*'`.
 
 ## Authentication
 
@@ -64,7 +112,7 @@ Without `--noproxy '*'`, requests hit the GateSentry proxy on port 10413 instead
 - Login endpoint: `POST /api/auth/token` with `{"username": "...", "pass": "..."}`
 - Response: `{"Validated": true, "Jwtoken": "..."}` on success
 - Use the JWT as `Authorization: Bearer <token>` header on subsequent requests
-- Admin credentials are stored encrypted in `bin/gatesentry/GSSettings`
+- Admin credentials are stored encrypted in `bin/gatesentry/GSSettings` (production: `/volume1/docker/Gatesentry/gatesentry/GSSettings`)
 
 ## Settings API
 
@@ -74,13 +122,20 @@ Without `--noproxy '*'`, requests hit the GateSentry proxy on port 10413 instead
 
 ## Blocked Domain Middleware
 
-The `blockedDomainMiddleware` in `webserver.go` intercepts requests where the HTTP `Host` header doesn't match a known GateSentry hostname. It serves a block page instead of the admin UI. Known hosts include `localhost`, `127.0.0.1`, `::1`, the machine's hostname, and all local network IPs.
+The `blockedDomainMiddleware` in `application/webserver/webserver.go` intercepts requests where the HTTP `Host` header doesn't match a known GateSentry hostname. It serves a block page instead of the admin UI. Known hosts include `localhost`, `127.0.0.1`, `::1`, the machine's hostname (`monster-jj`), `hostname.local`, and local interface IPs.
+
+**Gap:** FQDNs such as `monster-jj.jvj28.com` are **not** allowlisted. A browser that uses the FQDN gets a DNS-block page, which looks like the admin is down. Access via hostname, `.local`, or IP.
 
 ## Data Storage
 
-- Settings file: `bin/gatesentry/GSSettings` (encrypted JSON)
-- Filter files: `bin/gatesentry/filterfiles/`
-- The `MapStore` persists via `Update()` → `Set()` → `Persist()` → writes to disk
+- Settings file: `GSSettings` (encrypted JSON). `MapStore` persists via `Update()` → `Set()` → `Persist()` → disk
+- Filter files: `filterfiles/`
+- Logs: BuntDB `log.db` (was 134MB in production — treat as a capacity/availability issue)
+- Devices: `devices.json`
+
+### MapStore locking (known footgun)
+
+`MapStore.Update` holds `Mutex` and **returns without Unlock()** if JSON unmarshal fails (`application/storage/storage.go`). After that, every settings write deadlocks. `Get` / `SetDefault` do not take the mutex (data race with `Update`). Do not add more unlocked readers; fix the unlock path with `defer m.Mutex.Unlock()`.
 
 ## Proxy Rule Architecture
 
@@ -94,10 +149,10 @@ The proxy's ability to inspect traffic depends on whether SSL MITM (Man-in-the-M
 
 | What the proxy sees          | HTTP | HTTPS (no MITM) | HTTPS (MITM) |
 |------------------------------|------|------------------|---------------|
-| Domain / hostname            | ✅   | ✅               | ✅            |
-| URL path & query string      | ✅   | ❌               | ✅            |
-| Response Content-Type header | ✅   | ❌               | ✅            |
-| Response body (for keywords) | ✅   | ❌               | ✅            |
+| Domain / hostname            | yes  | yes              | yes          |
+| URL path & query string      | yes  | no               | yes          |
+| Response Content-Type header | yes  | no               | yes          |
+| Response body (for keywords) | yes  | no               | yes          |
 
 Because virtually all sites are HTTPS, **MITM must be enabled** for URL patterns, content-type matching, and keyword scanning to function.
 
@@ -115,40 +170,46 @@ The resolved MITM state determines whether steps 5–7 below can execute.
 For each incoming proxy request, rules are evaluated in priority order:
 
 1. **Check rule status** — If the rule is disabled, or the current local time is outside the rule's active hours window, **skip this rule**.
-
 2. **Check user list** — If the rule's user list is empty, it applies to all users. If non-empty and the requesting user is NOT in the list, **skip this rule**.
-
 3. **Check domain match** — Compare the request hostname against the rule's Domain Patterns and Domain Lists. If both are empty (catch-all rule), the domain matches. If non-empty and the domain does NOT match any pattern or list, **skip this rule**.
+4. **Resolve MITM** — `"enable"` → MITM on, `"disable"` → MITM off, `"default"` → global `enable_https_filtering`. If MITM is off AND the request is HTTPS, steps 5–7 are **skipped**. HTTP always passes through steps 5–7.
+5. **Check URL patterns** *(always for HTTP; requires MITM for HTTPS)* — If `url_regex_patterns` is non-empty and NO pattern matches, skip this rule.
+6. **Check content-type** *(always for HTTP; requires MITM for HTTPS)* — If `blocked_content_types` is non-empty and NO type matches, skip this rule.
+7. **Check keyword filter** *(always for HTTP; requires MITM for HTTPS)* — If `keyword_filter_enabled` is true and the keyword score exceeds the watermark, **force a Block action**.
+8. **Apply rule action** — `"allow"` or `"block"`.
 
-4. **Resolve MITM** — Determine the effective MITM state for this rule: `"enable"` → MITM on, `"disable"` → MITM off, `"default"` → use global `enable_https_filtering` setting. If MITM is off AND the request is HTTPS, steps 5–7 are **skipped** (the proxy cannot see URL paths, content-types, or body content through an encrypted tunnel) — proceed directly to step 8. **HTTP requests always pass through steps 5–7** regardless of the MITM setting.
-
-5. **Check URL patterns** *(always for HTTP; requires MITM for HTTPS)* — If the rule has `url_regex_patterns`, match them against the full request URL. If non-empty and NO pattern matches, **skip this rule** (fall through to next rule). If empty, this criterion is not evaluated (effective match).
-
-6. **Check content-type** *(always for HTTP; requires MITM for HTTPS)* — If the rule has `blocked_content_types`, match them against the response `Content-Type` header. If non-empty and NO type matches, **skip this rule**. If empty, this criterion is not evaluated (effective match).
-
-7. **Check keyword filter** *(always for HTTP; requires MITM for HTTPS)* — If `keyword_filter_enabled` is true, scan the response body for blocked keywords. If the keyword score exceeds the watermark threshold, **force a Block action** regardless of the rule's configured action. If below the watermark, continue to step 8.
-
-8. **Apply rule action** — All match criteria are satisfied. Apply the rule's action:
-   - `"allow"` → Proxy the request normally, deliver the response to the client.
-   - `"block"` → Serve a block page. The response body (if any) is discarded.
-
-If **no rule matches** after evaluating all rules, the request is allowed through (default-allow).
+If **no rule matches**, the request is allowed (default-allow).
 
 ### Implementation Notes
 
 - Steps 1–3 happen in `application/rules.go` → `MatchRule()` (pre-proxy, domain-level match).
-- Step 4 is resolved partly in `rules.go` (`ShouldMITM` field) and partly in `proxy.go` (global fallback for `"default"`).
-- Steps 5–7 happen in `gatesentryproxy/proxy.go` **after** the request has been proxied and the response headers/body are available. They are "post-response match criteria" — if they don't match, the rule is conceptually skipped (but since the request is already in flight, the proxy falls back to allowing it).
-- Step 8's block action at the domain level (step 3 match + no MITM-dependent criteria) short-circuits in `proxy.go` before the request is proxied.
+- Step 4 is resolved partly in `rules.go` (`ShouldMITM`) and partly in `proxy.go` (global fallback for `"default"`).
+- Steps 5–7 happen in `gatesentryproxy/proxy.go` **after** the request has been proxied.
+- Step 8's block action at the domain level short-circuits in `proxy.go` before the request is proxied.
 
 ### UI Form Layout
 
-The rule form (`ui/src/routes/rules/rform.svelte`) is organized to match this pipeline:
+The rule form (`ui/src/routes/rules/rform.svelte`) matches this pipeline:
 
 1. **Rule Definition** — Name, enabled toggle, active hours, MITM setting, description
 2. **User Match Criteria** — User list (empty = all users)
-3. **Rule Selection Criteria** — Domain patterns, domain lists, URL patterns, content-type. URL patterns and content-type show an informational "HTTPS requires MITM" badge when MITM is off (fields remain editable since they always work on HTTP).
-4. **Matching Results** — Keyword filter toggle (shows "HTTPS requires MITM" badge when MITM is off, remains editable) and final action (Allow / Block).
+3. **Rule Selection Criteria** — Domain patterns, domain lists, URL patterns, content-type
+4. **Matching Results** — Keyword filter toggle and final action (Allow / Block)
+
+## Availability — Admin must work when upstream DNS is down
+
+This is a product requirement, not an ops inconvenience. The last outage was: router DNS (`192.168.1.1:53`) down → operator tried to open admin to change `dns_resolver` → admin unresponsive → process later SIGTERM'd.
+
+Constraints the code must satisfy:
+
+- Failed upstream forwards must be **negatively cached** (and/or circuit-broken). Do not re-dial a dead resolver on every client retry.
+- Cap in-flight upstream queries (semaphore). Timeout is already 3s (`forwardDNSRequest`).
+- Do not `log.Println` or spawn a buntdb writer (`LogDNS`) on every DNS query. Gate verbose DNS logs behind `GS_DEBUG_LOGGING`.
+- Serve/resolve the admin host **locally** (device store, static A record, or Host allowlist including FQDN) so the UI does not depend on upstream DNS.
+- Admin HTTP server needs timeouts. Stats/logs handlers must not full-scan a 100MB+ `log.db` on page load.
+- When DNS is unhealthy, operators should use `http://<lan-ip>:9876/gatesentry/` with proxy bypass.
+
+`GATESENTRY_DNS_RESOLVER` is the emergency override: `Init()` writes it into `dns_resolver` before the DNS server starts.
 
 ## Code Quality & Common Pitfalls
 
@@ -170,7 +231,7 @@ These rules are derived from recurring issues caught during PR code reviews. **A
 
 ### Security — Proxy Header Hygiene
 
-- **Strip hop-by-hop and proxy-only headers** before forwarding requests upstream, especially in WebSocket tunnels. The following headers must NOT be forwarded:
+- **Strip hop-by-hop and proxy-only headers** before forwarding requests upstream, especially in WebSocket tunnels. Do not forward:
   - `Proxy-Authorization`, `Proxy-Authenticate`, `Proxy-Connection`
   - Hop-by-hop headers listed in `Connection:` header values
   - `TE`, `Transfer-Encoding`, `Upgrade` (unless specifically needed for the tunnel)
@@ -179,46 +240,44 @@ These rules are derived from recurring issues caught during PR code reviews. **A
 
 - **Never commit real private keys or credentials**, even for tests. Use `tests/fixtures/gen_test_certs.sh` to generate ephemeral test certs.
 - **Never pass passwords via CLI flags** (e.g., `docker login -p`). Use `--password-stdin` or environment variables.
-- Test fixture keys in `.gitignore` are OK; anything in tracked files must be obviously synthetic.
+- Hardcoded JWT HMAC in `application/webserver/webserver.go` (`hmacSampleSecret`) is a known issue — do not copy that pattern.
 
 ### Correctness — Go-Specific
 
-- **Range loop variable pointers**: In Go < 1.22, `&item` inside `for _, item := range` returns the address of the *reused* loop variable. Use `for i := range items` and `&items[i]` instead, or assign to a local variable first. The `gatesentryproxy` module is Go 1.17 — this is especially critical there.
-- **DNS FQDN trailing dots**: DNS-derived hostnames may include a trailing `.` (e.g., `example.com.`). Always normalize with `strings.TrimRight(domain, ".")` before comparing against domain lists or patterns.
-- **DNS cache keys**: `dns.TypeToString[qtype]` returns empty string for unknown qtypes. Always fall back to a numeric string (e.g., `strconv.Itoa(int(qtype))`) to prevent cache key collisions.
-- **`http.Error` with JSON bodies**: `http.Error` sets `Content-Type: text/plain`. If the body is JSON, manually set `Content-Type: application/json` and use `w.WriteHeader()` + `json.NewEncoder(w).Encode()`.
+- **Range loop variable pointers**: In Go < 1.22, `&item` inside `for _, item := range` returns the address of the *reused* loop variable. Use `for i := range items` and `&items[i]`. Critical in `gatesentryproxy` (Go 1.17).
+- **DNS FQDN trailing dots**: Normalize with `strings.TrimRight(domain, ".")` before comparing against domain lists or patterns.
+- **DNS cache keys**: `dns.TypeToString[qtype]` returns empty string for unknown qtypes. Fall back to `strconv.Itoa(int(qtype))`.
+- **`http.Error` with JSON bodies**: `http.Error` sets `Content-Type: text/plain`. For JSON, set `Content-Type: application/json` and use `w.WriteHeader()` + `json.NewEncoder`.
+- **Mutex unlock on all paths**: never `return` between `Lock()` and `Unlock()` without `defer`.
 
 ### Correctness — Configuration
 
-- **Never hardcode ports or addresses**. Always read from environment variables or settings:
-  - Admin port → `GS_ADMIN_PORT` (default `8080`)
-  - DNS port → `GATESENTRY_DNS_PORT` (default `10053`)
-  - Proxy port → configured in settings
-- **Normalize `basePath`**: Ensure it starts with `/` and does NOT end with `/` to avoid double-slash redirects.
-- **Test scripts**: Default to `localhost` / `127.0.0.1`, not private LAN IPs. Use environment variables for non-default addresses.
+- **Never hardcode ports or addresses**. Always read from environment variables or settings.
+- **Normalize `basePath`**: Ensure it starts with `/` and does NOT end with `/`.
+- **Test scripts**: Default to `localhost` / `127.0.0.1`. Use environment variables for non-default addresses.
 
 ### Code Quality
 
-- **No verbose logging in hot paths**. Functions called on every request (e.g., `GetHistory`, proxy handlers) should not log per-invocation unless behind a debug flag. Use `log.Printf` sparingly in:
-  - Request-level proxy handling
-  - DNS query resolution
-  - Cache operations called from API handlers
-- **No no-op tests**. Every test function must contain at least one assertion. A test that only calls `_ = rm` gives false coverage.
-- **Documentation consistency**: When changing default ports, paths, or URLs, grep for the old value across README.md, AGENTS.md, Makefile, Dockerfile, docker-compose.yml, and run.sh/restart.sh. Update all occurrences.
+- **No verbose logging in hot paths**. Functions called on every request (DNS handler, proxy handlers, `GetHistory`) should not log per-invocation unless behind a debug flag. The production DNS handler still logs every query — do not add more of that.
+- **No no-op tests**. Every test function must contain at least one assertion.
+- **Documentation consistency**: When changing default ports, paths, or URLs, grep README.md, AGENTS.md, Makefile, Dockerfile, docker-compose.yml, run.sh/restart.sh, and the Synology compose.
 
 ## Current Work In Progress
 
-We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_RULES_PLAN.md`). This is a multi-phase effort to unify DNS blocklists, proxy filters, and per-user rules around reusable "Domain Lists."
+We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_RULES_PLAN.md`) on **v2**. This unifies DNS blocklists, proxy filters, and per-user rules around reusable Domain Lists.
 
 ### Completed So Far
 
-- **Phase 1** — `DomainListManager` foundation (`application/domainlist/`): CRUD, index, loader, migration, API endpoints, tests (19 passing)
-- **Phase 2** — DNS Server Migration: DNS server uses shared `DomainListIndex` instead of its own `blockedDomains` map
-- **Phase 3** — Rule Struct Expansion: Rules can reference `DomainPatterns` (plural wildcards) and `DomainLists` (list IDs) for domain matching (18 rules tests passing)
-- **Phase 4** — Content Filtering by Domain List: MITM content filtering can block embedded resources by domain list membership (8 new tests)
-- **UI** — Domain Lists management page (`/domainlists`), DNS page rewritten with allow/block list assignment sections, menu cleanup (removed old Block List and Exception Hostnames items)
-- **Settings persistence fix** — Added `dns_domain_lists` and `dns_whitelist_domain_lists` to the GET/POST whitelists in `handler_settings.go`
+- **Phase 1** — `DomainListManager` foundation (`application/domainlist/`): CRUD, index, loader, migration, API endpoints, tests
+- **Phase 2** — DNS Server Migration: DNS server uses shared `DomainListIndex`
+- **Phase 3** — Rule Struct Expansion: `DomainPatterns` and `DomainLists` (18 rules tests)
+- **Phase 4** — Content Filtering by Domain List (8 new tests)
+- **UI** — Domain Lists page (`/domainlists`), DNS page allow/block list assignment, menu cleanup
+- **Settings persistence** — `dns_domain_lists` and `dns_whitelist_domain_lists` on the GET/POST whitelist
 
-### Known Issue: DNS Page UI Not Loading/Saving Lists
+### Known issues
 
-The `/dns` page (`dnslists.svelte`) is supposed to let the admin add/remove Domain Lists to DNS blocklist and whitelist sets (stored as `dns_domain_lists` and `dns_whitelist_domain_lists` settings keys). **The DNS filtering itself works** — domains are being blocked correctly. However, **the UI is not loading or saving** the assigned list IDs when navigating to the page. This is still being debugged.
+- **DNS page UI load/save of assigned list IDs** (`dnslists.svelte` / `dns.svelte`) was still being debugged. DNS filtering itself works.
+- **Production hang when upstream DNS is down** — see Availability section. Highest priority before bringing monster-jj back.
+- **`log.db` growth** (134MB) — stats default to a 7-day full scan (`handler_stats.go`).
+- **Publish and deploy `2.0.0-beta.1`** to monster-jj (see `PLAN.md` Phase 0).

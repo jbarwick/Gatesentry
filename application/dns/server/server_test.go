@@ -70,6 +70,9 @@ func setupTestServer(t *testing.T) func() {
 	// Leave domainListMgr nil so tests use legacy blockedDomains map by default
 	domainListMgr = nil
 	dnsSettings = nil
+	cachedBlockListIDs.Store([]string(nil))
+	cachedAllowListIDs.Store([]string(nil))
+	ResetUpstreamCircuit()
 
 	// Create a temp logger
 	logger = gatesentryLogger.NewLogger(t.TempDir() + "/test.db")
@@ -268,8 +271,8 @@ func TestHandleDNS_BlockedDomain(t *testing.T) {
 	if w.msg.Rcode != dns.RcodeSuccess {
 		t.Errorf("Expected RcodeSuccess (block page redirect), got %d", w.msg.Rcode)
 	}
-	if len(w.msg.Answer) != 1 {
-		t.Fatalf("Expected 1 answer (A record with local IP), got %d", len(w.msg.Answer))
+	if len(w.msg.Answer) < 1 {
+		t.Fatalf("Expected at least 1 answer (A record with local IP), got %d", len(w.msg.Answer))
 	}
 	a, ok := w.msg.Answer[0].(*dns.A)
 	if !ok {
@@ -431,6 +434,7 @@ func TestHandleDNS_BlockedViaDomainListManager(t *testing.T) {
 	domainListMgr = dlm
 	dnsSettings = gatesentry2storage.NewMapStore("test_settings", false)
 	dnsSettings.Update("dns_domain_lists", `["list-1"]`)
+	RefreshDNSListIDs()
 
 	req := new(dns.Msg)
 	req.SetQuestion("badsite.example.com.", dns.TypeA)
@@ -444,8 +448,8 @@ func TestHandleDNS_BlockedViaDomainListManager(t *testing.T) {
 	if w.msg.Rcode != dns.RcodeSuccess {
 		t.Errorf("Expected RcodeSuccess (block page redirect), got %d", w.msg.Rcode)
 	}
-	if len(w.msg.Answer) != 1 {
-		t.Fatalf("Expected 1 answer (A record with local IP), got %d", len(w.msg.Answer))
+	if len(w.msg.Answer) < 1 {
+		t.Fatalf("Expected at least 1 answer (A record with local IP), got %d", len(w.msg.Answer))
 	}
 	a, ok := w.msg.Answer[0].(*dns.A)
 	if !ok {
@@ -475,6 +479,7 @@ func TestHandleDNS_WhitelistOverridesBlocklist(t *testing.T) {
 	dnsSettings = gatesentry2storage.NewMapStore("test_settings_wl", false)
 	dnsSettings.Update("dns_domain_lists", `["blocklist-1"]`)
 	dnsSettings.Update("dns_whitelist_domain_lists", `["whitelist-1"]`)
+	RefreshDNSListIDs()
 
 	// The domain should NOT be blocked because whitelist overrides
 	if isDomainBlocked("safe.example.com") {
@@ -500,5 +505,75 @@ func TestHandleDNS_NoDomainListsFallsBackToLegacy(t *testing.T) {
 	}
 	if isDomainBlocked("not-blocked.com") {
 		t.Error("Expected not-blocked.com to NOT be blocked")
+	}
+}
+
+func TestEmptyQuestionDoesNotPanic(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	req := new(dns.Msg)
+	req.SetQuestion(".", dns.TypeA)
+	w := newMockResponseWriter("192.168.1.50")
+	handleDNSRequest(w, req)
+}
+
+func TestUpstreamCircuitOpensAfterFailures(t *testing.T) {
+	ResetUpstreamCircuit()
+	defer ResetUpstreamCircuit()
+
+	for i := 0; i < circuitFailThreshold; i++ {
+		noteUpstreamFailure()
+	}
+	if !circuitIsOpen() {
+		t.Fatal("expected circuit to open after consecutive failures")
+	}
+	noteUpstreamSuccess()
+	if circuitIsOpen() {
+		t.Fatal("expected circuit to close after success")
+	}
+}
+
+func TestResolverForMsgUsesIPv6UpstreamForAAAA(t *testing.T) {
+	ResetUpstreamCircuit()
+	SetExternalResolver("192.168.1.1:53")
+	SetExternalResolverIPv6("[fd00:1234:5678::1]:53")
+
+	aaaa := new(dns.Msg)
+	aaaa.SetQuestion("example.com.", dns.TypeAAAA)
+	if got := resolverForMsg(aaaa); got != "[fd00:1234:5678::1]:53" {
+		t.Fatalf("AAAA resolver = %q", got)
+	}
+
+	a := new(dns.Msg)
+	a.SetQuestion("example.com.", dns.TypeA)
+	if got := resolverForMsg(a); got != "192.168.1.1:53" {
+		t.Fatalf("A resolver = %q", got)
+	}
+
+	ptr := new(dns.Msg)
+	ptr.SetQuestion("1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.7.6.5.4.3.2.1.ip6.arpa.", dns.TypePTR)
+	if got := resolverForMsg(ptr); got != "[fd00:1234:5678::1]:53" {
+		t.Fatalf("ip6.arpa PTR resolver = %q", got)
+	}
+}
+
+func TestForwardSemaphoreRejectsWhenFull(t *testing.T) {
+	ResetUpstreamCircuit()
+	// Fill the semaphore
+	acquired := 0
+	for i := 0; i < maxInFlightForwards; i++ {
+		if tryAcquireForward() {
+			acquired++
+		}
+	}
+	if acquired != maxInFlightForwards {
+		t.Fatalf("acquired %d, want %d", acquired, maxInFlightForwards)
+	}
+	if tryAcquireForward() {
+		t.Fatal("expected semaphore to reject when full")
+	}
+	for i := 0; i < acquired; i++ {
+		releaseForward()
 	}
 }

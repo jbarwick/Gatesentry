@@ -55,6 +55,11 @@ type Config struct {
 	// but for a home proxy we prefer shorter to avoid stale NXDOMAIN.
 	NegativeTTL time.Duration
 
+	// FailureTTL is how long SERVFAIL / upstream-timeout responses are cached
+	// so a dead resolver is not re-dialed on every client retry.
+	// Default: 15 seconds.
+	FailureTTL time.Duration
+
 	// ReapInterval is how often the background reaper sweeps for expired entries.
 	// Default: 30 seconds. Lower values reclaim memory faster but cost more CPU.
 	ReapInterval time.Duration
@@ -68,6 +73,7 @@ func DefaultConfig() Config {
 		MinTTL:       5 * time.Second,
 		MaxTTL:       1 * time.Hour,
 		NegativeTTL:  5 * time.Minute,
+		FailureTTL:   15 * time.Second,
 		ReapInterval: 30 * time.Second,
 	}
 }
@@ -136,6 +142,9 @@ func New(cfg Config) *DNSCache {
 	}
 	if cfg.NegativeTTL <= 0 {
 		cfg.NegativeTTL = DefaultConfig().NegativeTTL
+	}
+	if cfg.FailureTTL <= 0 {
+		cfg.FailureTTL = DefaultConfig().FailureTTL
 	}
 	if cfg.ReapInterval <= 0 {
 		cfg.ReapInterval = DefaultConfig().ReapInterval
@@ -229,10 +238,14 @@ func (c *DNSCache) Put(qname string, qtype uint16, msg *dns.Msg) {
 	if msg == nil {
 		return
 	}
+	c.PutWithTTL(qname, qtype, msg, c.computeTTL(msg))
+}
 
-	ttl := c.computeTTL(msg)
-	if ttl <= 0 {
-		return // don't cache zero-TTL entries
+// PutWithTTL stores a DNS response for an explicit TTL. Used for
+// upstream-failure caching where computeTTL would return 0.
+func (c *DNSCache) PutWithTTL(qname string, qtype uint16, msg *dns.Msg, ttl time.Duration) {
+	if msg == nil || ttl <= 0 {
+		return
 	}
 
 	key := cacheKey(qname, qtype)
@@ -246,13 +259,11 @@ func (c *DNSCache) Put(qname string, qtype uint16, msg *dns.Msg) {
 
 	s.mu.Lock()
 
-	// If replacing an existing entry, adjust counters
 	if old, ok := s.entries[key]; ok {
 		c.stats.SizeBytes.Add(-int64(old.sizeBytes))
 		c.stats.Entries.Add(-1)
 	}
 
-	// Evict if at capacity
 	if len(s.entries) >= s.maxLocal {
 		c.evictFromShard(s)
 	}
@@ -264,11 +275,23 @@ func (c *DNSCache) Put(qname string, qtype uint16, msg *dns.Msg) {
 
 	s.mu.Unlock()
 
-	// Emit insert event (after releasing the lock)
 	c.Events.Emit(InsertEvent(
 		qname, dns.TypeToString[qtype],
 		int(ttl.Seconds()), c.stats.Entries.Load(),
 	))
+}
+
+// PutFailure caches a SERVFAIL (or other error rcode) so a dead upstream
+// is not re-queried on every client retry.
+func (c *DNSCache) PutFailure(qname string, qtype uint16, rcode int) {
+	m := new(dns.Msg)
+	m.SetQuestion(qname, qtype)
+	m.Rcode = rcode
+	ttl := c.config.FailureTTL
+	if ttl <= 0 {
+		ttl = 15 * time.Second
+	}
+	c.PutWithTTL(qname, qtype, m, ttl)
 }
 
 // Flush removes all entries from the cache.

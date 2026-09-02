@@ -12,8 +12,8 @@ import (
 // ParseStatsQuery extracts seconds and group from the request query string.
 // Defaults: seconds=604800 (7 days), group="day".
 func ParseStatsQuery(r *http.Request) (seconds int, group string) {
-	seconds = 604800 // 7 days
-	group = "day"
+	seconds = 86400 // 24 hours — a 7-day default scans a huge log.db
+	group = "hour"
 
 	if s := r.URL.Query().Get("seconds"); s != "" {
 		if v, err := strconv.Atoi(s); err == nil && v > 0 {

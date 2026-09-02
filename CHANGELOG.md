@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## v2.0.0-beta.2 (2 September 2026)
+
+- Dual-stack DNS listen (`0.0.0.0` plus `::`); AAAA answers for appliance/WPAD/blocked names
+- Separate IPv6 upstream resolver (`dns_resolver_ipv6`, default `[fd00:1234:5678::1]:53`); AAAA/HTTPS/ip6.arpa use it
+- Generate fallback blocked image when `blocked.jpg` is missing
+- Bonjour advertises using the LAN IPv4 instead of hostname lookup
+- Timezone follows container `TZ` (Asia/Singapore on monster-jj)
+- Quiet IPv6 "network is unreachable" proxy log spam
+
+## v2.0.0-beta.1 (2 September 2026)
+
+Control-plane availability when upstream DNS is down (monster-jj hang):
+
+- Negative-cache SERVFAIL/timeouts; cap in-flight upstream queries; circuit-break a dead resolver
+- `MapStore` no longer deadlocks on unmarshal failure; Get is locked; Init reloads in place
+- DNS hot path no longer logs every query or spawns a buntdb writer per request
+- Admin Host allowlist includes `hostname.<zone>` and `GS_ADMIN_HOSTS`; appliance names answered locally
+- Admin HTTP server timeouts; authenticated `/api/logs/{id}`; real `Stop()`
+- In-process HTTP clients ignore `HTTP_PROXY`; `InitProxy` no longer resets `GS_MAX_SCAN_SIZE_MB`
+- DDNS defaults off for new installs; stats default window 24h; domain-list parent matching
+
 ## v1.20.6 (31 January 2026)
 
 - Fix HTTP2 not working properly in transparent mode

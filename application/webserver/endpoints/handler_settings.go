@@ -25,7 +25,7 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 			value = string(valueJson)
 		}
 		return struct{ Value string }{Value: value}
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "enable_dns_filtering", "dns_custom_entries", "dns_domain_lists", "dns_whitelist_domain_lists", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver", "wpad_enabled", "wpad_proxy_host", "wpad_proxy_port", "wpad_bypass_domain_lists", "dns_local_zone", "ddns_enabled", "ddns_tsig_required", "ddns_tsig_key_name", "ddns_tsig_key_secret":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "enable_dns_filtering", "dns_custom_entries", "dns_domain_lists", "dns_whitelist_domain_lists", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver", "dns_resolver_ipv6", "wpad_enabled", "wpad_proxy_host", "wpad_proxy_port", "wpad_bypass_domain_lists", "dns_local_zone", "ddns_enabled", "ddns_tsig_required", "ddns_tsig_key_name", "ddns_tsig_key_secret":
 		value := settings.Get(requestedId)
 		return struct {
 			Key   string
@@ -70,11 +70,10 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 			// convert general_settings_parsed to json
 			valueJson, err := json.Marshal(general_settings_parsed)
 			if err != nil {
-				log.Fatal("Unable to marshal general settings")
-			} else {
-				//convert valuejSON to string
-				settings.Update(requestedId, string(valueJson))
+				log.Printf("Unable to marshal general settings: %v", err)
+				return temp
 			}
+			settings.Update(requestedId, string(valueJson))
 		}
 	}
 
@@ -91,6 +90,8 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		requestedId == "capem" ||
 		requestedId == "keypem" ||
 		requestedId == "dns_resolver" ||
+		requestedId == "dns_resolver_ipv6" ||
+		requestedId == "timezone" ||
 		requestedId == "wpad_enabled" ||
 		requestedId == "wpad_proxy_host" ||
 		requestedId == "wpad_proxy_port" ||
@@ -104,9 +105,19 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		if requestedId == "dns_resolver" {
 			gatesentryDnsServer.SetExternalResolver(temp.Value)
 		}
+		if requestedId == "dns_resolver_ipv6" {
+			gatesentryDnsServer.SetExternalResolverIPv6(temp.Value)
+		}
+		if requestedId == "dns_domain_lists" || requestedId == "dns_whitelist_domain_lists" {
+			gatesentryDnsServer.RefreshDNSListIDs()
+		}
 		// Update DNS zones at runtime
 		if requestedId == "dns_local_zone" {
 			gatesentryDnsServer.SetDNSZones(temp.Value)
+			gatesentryDnsServer.RegisterApplianceNames()
+		}
+		if requestedId == "wpad_proxy_host" {
+			gatesentryDnsServer.RegisterApplianceNames()
 		}
 		// Immediately reload the proxy certificate when either PEM is updated
 		if requestedId == "capem" || requestedId == "keypem" {

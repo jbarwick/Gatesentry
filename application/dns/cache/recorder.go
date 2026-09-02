@@ -68,7 +68,14 @@ func (r *Recorder) Start() {
 
 // Stop signals the recorder goroutine to exit and waits for it to finish.
 func (r *Recorder) Stop() {
-	close(r.stopCh)
+	if r == nil {
+		return
+	}
+	select {
+	case <-r.stopCh:
+	default:
+		close(r.stopCh)
+	}
 	r.wg.Wait()
 	log.Println("[Cache Recorder] Stopped")
 }
@@ -139,9 +146,12 @@ func (r *Recorder) GetHistory(minutes int) []TimestampedSnapshot {
 	var results []TimestampedSnapshot
 
 	err := r.db.View(func(tx *buntdb.Tx) error {
-		return tx.AscendGreaterOrEqual("", cutoffKey, func(key, value string) bool {
+		return tx.AscendGreaterOrEqual("", keyPrefix, func(key, value string) bool {
 			if !strings.HasPrefix(key, keyPrefix) {
-				return true // skip non-snapshot keys
+				return false // left the snapshot key range
+			}
+			if key < cutoffKey {
+				return true
 			}
 
 			timeStr := strings.TrimPrefix(key, keyPrefix)

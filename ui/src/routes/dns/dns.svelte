@@ -645,18 +645,28 @@
   <!-- Upstream resolver -->
   <div class="gs-section">
     <div class="gs-card">
-      <h5>Upstream DNS Resolver</h5>
+      <h5>Upstream DNS Resolvers</h5>
       <p class="dns-list-hint">
-        The upstream DNS server used to resolve queries that are not blocked or
-        overridden by custom A records.
+        Queries that are not blocked or overridden locally are forwarded here.
+        IPv4 (A) lookups use the IPv4 resolver; IPv6 (AAAA) lookups use the
+        IPv6 resolver.
       </p>
       <div style="margin-top: 8px; max-width: 400px;">
         <ConnectedSettingInput
           keyName="dns_resolver"
-          title={$_("DNS Resolver")}
-          labelText={$_("DNS Resolver")}
+          title={$_("IPv4 DNS Resolver")}
+          labelText={$_("IPv4 DNS Resolver")}
           type="text"
-          helperText=""
+          helperText="host:port — e.g. 192.168.1.1:53"
+        />
+      </div>
+      <div style="margin-top: 12px; max-width: 400px;">
+        <ConnectedSettingInput
+          keyName="dns_resolver_ipv6"
+          title={$_("IPv6 DNS Resolver")}
+          labelText={$_("IPv6 DNS Resolver")}
+          type="text"
+          helperText="[addr]:port — e.g. [fd00:1234:5678::1]:53"
         />
       </div>
     </div>

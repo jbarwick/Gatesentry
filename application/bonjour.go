@@ -2,6 +2,7 @@ package gatesentryf
 
 import (
 	"log"
+	"net"
 	"os"
 	"strconv"
 
@@ -25,21 +26,41 @@ func StartBonjour() {
 		basePath = "/"
 	}
 
-	// Advertise the web admin UI so browsers resolve http://gatesentry.local
-	go func() {
-		_, err := bonjour.Register("GateSentry", "_http._tcp", "", adminPort, []string{"txtv=1", "app=gatesentry", "path=" + basePath}, nil)
-		if err != nil {
-			log.Println("[Bonjour] HTTP registration error:", err.Error())
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "gatesentry"
+	}
+	ip := ""
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+				s := ipnet.IP.String()
+				if len(s) > 4 && (s[:4] == "192." || s[:3] == "10.") {
+					ip = s
+					break
+				}
+				if ip == "" {
+					ip = s
+				}
+			}
 		}
-	}()
+	}
 
-	// Advertise the filtering proxy for proxy auto-discovery
-	go func() {
-		_, err := bonjour.Register("GateSentry Proxy", "_gatesentry_proxy._tcp", "", 10413, []string{"txtv=1", "app=gatesentry"}, nil)
-		if err != nil {
-			log.Println("[Bonjour] Proxy registration error:", err.Error())
+	register := func(name, service string, port int) {
+		txt := []string{"txtv=1", "app=gatesentry", "path=" + basePath}
+		var err error
+		if ip != "" {
+			_, err = bonjour.RegisterProxy(name, service, "local.", port, host+".local.", ip, txt, nil)
+		} else {
+			_, err = bonjour.Register(name, service, "", port, txt, nil)
 		}
-	}()
+		if err != nil {
+			log.Println("[Bonjour] registration error:", name, err.Error())
+		}
+	}
+
+	go register("GateSentry", "_http._tcp", adminPort)
+	go register("GateSentry Proxy", "_gatesentry_proxy._tcp", 10413)
 
 	// Run registration (blocking call)
 

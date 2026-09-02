@@ -75,14 +75,29 @@ func blockedDomainMiddleware(settings *gatesentry2storage.MapStore, port string)
 		"::1":       true,
 	}
 
-	// Add the machine's hostname
 	if hostname, err := os.Hostname(); err == nil {
-		knownHosts[strings.ToLower(hostname)] = true
-		// Also add hostname.local for mDNS
-		knownHosts[strings.ToLower(hostname)+".local"] = true
+		h := strings.ToLower(hostname)
+		knownHosts[h] = true
+		knownHosts[h+".local"] = true
+		if settings != nil {
+			for _, z := range strings.Split(settings.Get("dns_local_zone"), ",") {
+				z = strings.ToLower(strings.TrimSpace(z))
+				if z != "" {
+					knownHosts[h+"."+z] = true
+				}
+			}
+		}
 	}
 
-	// Add any local network IPs
+	if extra := os.Getenv("GS_ADMIN_HOSTS"); extra != "" {
+		for _, n := range strings.Split(extra, ",") {
+			n = strings.ToLower(strings.TrimSpace(n))
+			if n != "" {
+				knownHosts[n] = true
+			}
+		}
+	}
+
 	if addrs, err := net.InterfaceAddrs(); err == nil {
 		for _, addr := range addrs {
 			if ipnet, ok := addr.(*net.IPNet); ok {
@@ -463,7 +478,7 @@ func RegisterEndpointsStartServer(
 		gatesentryWebserverEndpoints.ApiLogsQuery(w, r, logger)
 	})
 
-	internalServer.Get("/api/logs/{id}", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	internalServer.Get("/api/logs/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		queryParams := r.URL.Query()
 		searchValue := queryParams.Get("search")
 
@@ -475,7 +490,7 @@ func RegisterEndpointsStartServer(
 
 		output := gatesentryWebserverEndpoints.ApiLogsGET(logger)
 		SendJSON(w, output)
-	}))
+	})
 
 	internalServer.Get("/api/dns/info", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		output := gatesentryWebserverEndpoints.GSApiDNSInfo(dnsServerInfo)

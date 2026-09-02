@@ -8,4 +8,5 @@ test('dns page exposes resolver input', () => {
   const source = readFileSync(file, 'utf-8');
   const { js } = compile(source, { generate: 'dom' });
   expect(js.code).toMatch('dns_resolver');
+  expect(js.code).toMatch('dns_resolver_ipv6');
 });

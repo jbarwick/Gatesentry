@@ -1,10 +1,15 @@
 package gatesentryf
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"strconv"
+	"time"
 
+	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
+	gatesentryWebserver "bitbucket.org/abdullah_irfan/gatesentryf/webserver"
 )
 
 var R *GSRuntime
@@ -38,4 +43,13 @@ func Start(webadminport int) *GSRuntime {
 
 func Stop() {
 	fmt.Println("Stopping GateSentry " + GSVerString)
+	gatesentryDnsServer.StopDNSServer()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := gatesentryWebserver.ShutdownAdmin(ctx); err != nil {
+		log.Printf("Admin server shutdown: %v", err)
+	}
+	if R != nil && R.Logger != nil {
+		R.Logger.Close()
+	}
 }

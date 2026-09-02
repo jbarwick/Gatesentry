@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"time"
 )
 
 // loadCertificate loads the TLS certificate specified by certFile and keyFile
@@ -132,7 +133,13 @@ func validCert(cert *x509.Certificate, intermediates []*x509.Certificate) bool {
 			continue
 		}
 		log.Println("[SSL] Getting certificate from " + certURL)
-		resp, err := http.Get(certURL)
+		client := &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				Proxy: nil,
+			},
+		}
+		resp, err := client.Get(certURL)
 		if err == nil {
 			defer resp.Body.Close()
 		}

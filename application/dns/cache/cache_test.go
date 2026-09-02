@@ -87,6 +87,26 @@ func TestPutAndGet(t *testing.T) {
 	}
 }
 
+func TestPutFailureCached(t *testing.T) {
+	cfg := fastConfig()
+	cfg.FailureTTL = 200 * time.Millisecond
+	c := New(cfg)
+	defer c.Stop()
+
+	c.PutFailure("dead.example.", dns.TypeA, dns.RcodeServerFailure)
+	got := c.Get("dead.example.", dns.TypeA)
+	if got == nil {
+		t.Fatal("expected cached SERVFAIL")
+	}
+	if got.Rcode != dns.RcodeServerFailure {
+		t.Fatalf("rcode = %d, want SERVFAIL", got.Rcode)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if c.Get("dead.example.", dns.TypeA) != nil {
+		t.Fatal("expected failure cache to expire")
+	}
+}
+
 func TestGetMiss(t *testing.T) {
 	c := New(fastConfig())
 	defer c.Stop()

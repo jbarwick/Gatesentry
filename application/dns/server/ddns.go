@@ -15,8 +15,8 @@ import (
 
 var (
 	// ddnsEnabled controls whether DDNS UPDATE messages are accepted.
-	// Default: true (DDNS works out of the box for DHCP servers on the same machine).
-	ddnsEnabled = true
+	// Default: false — must be turned on in settings (TSIG recommended).
+	ddnsEnabled = false
 
 	// ddnsTSIGRequired controls whether TSIG authentication is mandatory.
 	// Default: false (simple setups don't need TSIG; enable for security).

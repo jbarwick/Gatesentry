@@ -32,7 +32,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "80"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "2.0.0-alpha.15"
+var GATESENTRY_VERSION = "2.0.0-beta.2"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -330,15 +330,18 @@ func RunGateSentry() {
 	}
 
 	ngp.IsExceptionUrl = func(url string) bool {
-		host := url
-		log.Println("Running exception handler for = ", host)
+		if gatesentryproxy.DebugLogging {
+			log.Println("Running exception handler for = ", url)
+		}
 		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_exception_urls", host, responder)
+		application.RunFilter("url/all_exception_urls", url, responder)
 		return responder.Blocked
 	}
 
 	ngp.UserAccessHandler = func(gafd *gatesentryproxy.GSUserAccessFilterData) {
-		log.Println("Running user access handler")
+		if gatesentryproxy.DebugLogging {
+			log.Println("Running user access handler")
+		}
 		if R.UserExists(gafd.User) {
 			if R.IsUserActive(gafd.User) {
 				gafd.FilterResponseAction = gatesentryproxy.ProxyActionUserActive

@@ -71,6 +71,9 @@ var (
 	exceptionDomains = make(map[string]bool)
 	internalRecords  = make(map[string]string)
 	localIp, _       = gatesentryDnsUtils.GetLocalIP()
+	localIPv6, _     = gatesentryDnsUtils.GetLocalIPv6()
+	localIps         = gatesentryDnsUtils.GetLocalIPs()
+	localIPv6s       = gatesentryDnsUtils.GetLocalIPv6s()
 	queryLogs        = make(map[string][]QueryLog)
 	logMutex         sync.Mutex
 	logsFile         *os.File
@@ -98,6 +101,20 @@ var domainListMgr *gatesentryDomainList.DomainListManager
 // settings is the shared settings store, set during StartDNSServer.
 // Used to read dns_domain_lists and dns_whitelist_domain_lists.
 var dnsSettings *gatesentry2storage.MapStore
+
+// Cached domain-list IDs so isDomainBlocked does not unmarshal GSSettings
+// on every query.
+var (
+	cachedBlockListIDs atomic.Value // []string
+	cachedAllowListIDs atomic.Value // []string
+)
+
+// Appliance hostnames answered locally so the admin UI does not depend on
+// upstream DNS.
+var (
+	selfNamesMu sync.RWMutex
+	selfNames   = map[string]bool{}
+)
 
 func init() {
 	// WPAD DNS interception is enabled by default
@@ -209,12 +226,21 @@ func SetListenPort(port string) {
 
 func SetExternalResolver(resolver string) {
 	if resolver != "" {
-		externalResolver = normalizeResolver(resolver)
+		r := normalizeResolver(resolver)
+		externalResolver = r
+		resolverValue.Store(r)
 	}
 }
 
-var server *dns.Server        // UDP server
-var tcpServer *dns.Server     // TCP server for large queries (>512 bytes)
+func SetExternalResolverIPv6(resolver string) {
+	if resolver != "" {
+		resolverIPv6Value.Store(normalizeResolver(resolver))
+	}
+}
+
+var server *dns.Server    // UDP server (primary listen address)
+var tcpServer *dns.Server // TCP server for large queries (>512 bytes)
+var extraDNSServers []*dns.Server
 var serverRunning atomic.Bool // Thread-safe flag for server state
 var restartDnsSchedulerChan chan bool
 
@@ -288,10 +314,13 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	logger = ilogger
 	logsPath = basePath + logsPath
 	SetExternalResolver(settings.Get("dns_resolver"))
+	SetExternalResolverIPv6(settings.Get("dns_resolver_ipv6"))
 
 	// Store shared references for use in handleDNSRequest
 	domainListMgr = dlManager
 	dnsSettings = settings
+	RefreshDNSListIDs()
+	registerApplianceNames(settings)
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
 
@@ -347,8 +376,8 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	//           ddns_tsig_key_secret, ddns_tsig_algorithm
 	ddnsEnabledStr := settings.Get("ddns_enabled")
 	if ddnsEnabledStr == "" {
-		// Seed default: DDNS enabled out of the box
-		ddnsEnabledStr = "true"
+		// New installs: DDNS off until the admin enables it (TSIG recommended).
+		ddnsEnabledStr = "false"
 		settings.Update("ddns_enabled", ddnsEnabledStr)
 	}
 	ddnsEnabled = ddnsEnabledStr == "true"
@@ -398,39 +427,39 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	restartDnsSchedulerChan <- true
 
 	serverRunning.Store(true)
-	// go PrintQueryLogsPeriodically()
-	// Listen for incoming DNS requests on configured address:port (default: 0.0.0.0:53)
-	// Use net.JoinHostPort to properly handle IPv6 addresses (adds brackets)
-	bindAddr := net.JoinHostPort(listenAddr, listenPort)
+	addrs := dnsListenAddrs()
+	primary := net.JoinHostPort(addrs[0], listenPort)
 
-	// Start TCP server in a goroutine for large DNS queries (>512 bytes)
-	// TCP is required for DNSSEC, large TXT records, zone transfers, etc.
-	// MsgAcceptFunc is overridden to accept UPDATE opcode (default rejects it).
-	// TsigSecret enables server-level TSIG verification for DDNS.
 	tcpServer = &dns.Server{
-		Addr:          bindAddr,
+		Addr:          primary,
 		Net:           "tcp",
 		MsgAcceptFunc: ddnsMsgAcceptFunc,
 		TsigSecret:    tsigSecrets,
+		Handler:       dns.HandlerFunc(handleDNSRequest),
 	}
-	tcpServer.Handler = dns.HandlerFunc(handleDNSRequest)
 	go func() {
-		fmt.Printf("DNS forwarder listening on %s (TCP). Handles large queries >512 bytes.\n", bindAddr)
+		fmt.Printf("DNS forwarder listening on %s (TCP). Handles large queries >512 bytes.\n", primary)
 		if err := tcpServer.ListenAndServe(); err != nil {
 			log.Printf("[DNS] TCP server error: %v", err)
 		}
 	}()
 
-	// Start UDP server (blocks)
+	for _, a := range addrs[1:] {
+		bind := net.JoinHostPort(a, listenPort)
+		startExtraDNSListener(bind, "udp", ddnsMsgAcceptFunc, tsigSecrets)
+		startExtraDNSListener(bind, "tcp", ddnsMsgAcceptFunc, tsigSecrets)
+	}
+
 	server = &dns.Server{
-		Addr:          bindAddr,
+		Addr:          primary,
 		Net:           "udp",
 		MsgAcceptFunc: ddnsMsgAcceptFunc,
 		TsigSecret:    tsigSecrets,
+		Handler:       dns.HandlerFunc(handleDNSRequest),
 	}
-	server.Handler = dns.HandlerFunc(handleDNSRequest)
 
-	fmt.Printf("DNS forwarder listening on %s (UDP). Local IP: %s. External resolver: %s\n", bindAddr, localIp, externalResolver)
+	fmt.Printf("DNS forwarder listening on %s (UDP). Local IP: %s %s. Upstream IPv4: %s IPv6: %s\n",
+		primary, localIp, localIPv6, currentResolver(), currentResolverIPv6())
 	err := server.ListenAndServe()
 	if err != nil {
 		fmt.Println(err)
@@ -453,6 +482,11 @@ func StopDNSServer() {
 		}
 	}
 
+	if cacheRecorder != nil {
+		cacheRecorder.Stop()
+		cacheRecorder = nil
+	}
+
 	// Stop DNS response cache (stops reaper goroutine)
 	if dnsResponseCache != nil {
 		dnsResponseCache.Stop()
@@ -473,7 +507,6 @@ func StopDNSServer() {
 		tcpServer = nil
 	}
 
-	// Stop UDP server
 	if server != nil {
 		if err := server.Shutdown(); err != nil {
 			log.Printf("[DNS] Error shutting down UDP server: %v", err)
@@ -481,7 +514,60 @@ func StopDNSServer() {
 		server = nil
 	}
 
+	for _, s := range extraDNSServers {
+		if s != nil {
+			_ = s.Shutdown()
+		}
+	}
+	extraDNSServers = nil
+
 	serverRunning.Store(false)
+}
+
+func dnsListenAddrs() []string {
+	parts := strings.Split(listenAddr, ",")
+	var addrs []string
+	seen := map[string]bool{}
+	hasV4, hasV6 := false, false
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		addrs = append(addrs, p)
+		ip := net.ParseIP(p)
+		if p == "0.0.0.0" || (ip != nil && ip.To4() != nil) {
+			hasV4 = true
+		} else {
+			hasV6 = true
+		}
+	}
+	if len(addrs) == 0 {
+		addrs = []string{"0.0.0.0"}
+		hasV4 = true
+	}
+	if hasV4 && !hasV6 {
+		addrs = append(addrs, "::")
+	}
+	return addrs
+}
+
+func startExtraDNSListener(bind, network string, accept dns.MsgAcceptFunc, tsig map[string]string) {
+	s := &dns.Server{
+		Addr:          bind,
+		Net:           network,
+		MsgAcceptFunc: accept,
+		TsigSecret:    tsig,
+		Handler:       dns.HandlerFunc(handleDNSRequest),
+	}
+	extraDNSServers = append(extraDNSServers, s)
+	go func() {
+		log.Printf("[DNS] extra listener %s %s", network, bind)
+		if err := s.ListenAndServe(); err != nil {
+			log.Printf("[DNS] extra %s %s: %v", network, bind, err)
+		}
+	}()
 }
 
 // getDomainListIDs reads a JSON array of domain list IDs from the given
@@ -502,6 +588,134 @@ func getDomainListIDs(key string) []string {
 	return ids
 }
 
+// RefreshDNSListIDs re-parses dns_domain_lists / whitelist IDs from settings.
+// Call after those settings change and at DNS server start.
+func RefreshDNSListIDs() {
+	cachedBlockListIDs.Store(getDomainListIDs("dns_domain_lists"))
+	cachedAllowListIDs.Store(getDomainListIDs("dns_whitelist_domain_lists"))
+}
+
+func loadCachedListIDs(v atomic.Value) []string {
+	ids, _ := v.Load().([]string)
+	return ids
+}
+
+// RegisterApplianceNames rebuilds local A records for this host.
+func RegisterApplianceNames() {
+	registerApplianceNames(dnsSettings)
+}
+
+func registerApplianceNames(settings *gatesentry2storage.MapStore) {
+	names := make(map[string]bool)
+	add := func(n string) {
+		n = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(n, ".")))
+		if n != "" {
+			names[n] = true
+		}
+	}
+
+	if hostname, err := os.Hostname(); err == nil {
+		add(hostname)
+		add(hostname + ".local")
+		zoneSetting := ""
+		if settings != nil {
+			zoneSetting = settings.Get("dns_local_zone")
+		}
+		for _, z := range parseDNSZones(zoneSetting) {
+			add(hostname + "." + z)
+		}
+	}
+	if env := os.Getenv("GS_ADMIN_HOSTS"); env != "" {
+		for _, n := range strings.Split(env, ",") {
+			add(n)
+		}
+	}
+	if settings != nil {
+		add(settings.Get("wpad_proxy_host"))
+	}
+
+	selfNamesMu.Lock()
+	selfNames = names
+	selfNamesMu.Unlock()
+
+	if ip, err := gatesentryDnsUtils.GetLocalIP(); err == nil {
+		localIp = ip
+	}
+	if ip, err := gatesentryDnsUtils.GetLocalIPv6(); err == nil {
+		localIPv6 = ip
+	}
+	localIps = gatesentryDnsUtils.GetLocalIPs()
+	localIPv6s = gatesentryDnsUtils.GetLocalIPv6s()
+	if localIp != "" {
+		mutex.Lock()
+		for n := range names {
+			internalRecords[n] = localIp
+		}
+		mutex.Unlock()
+	}
+	log.Printf("[DNS] Appliance names: %v → A %v AAAA %v", mapKeys(names), localIps, localIPv6s)
+}
+
+func mapKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func isApplianceName(domain string) bool {
+	selfNamesMu.RLock()
+	ok := selfNames[strings.ToLower(domain)]
+	selfNamesMu.RUnlock()
+	return ok
+}
+
+func selfAnswers(qname string, qtype uint16) []dns.RR {
+	// Re-scan each time so plugging in a NIC is picked up without restart.
+	localIps = gatesentryDnsUtils.GetLocalIPs()
+	localIPv6s = gatesentryDnsUtils.GetLocalIPv6s()
+	if len(localIps) > 0 {
+		localIp = localIps[0]
+	}
+	if len(localIPv6s) > 0 {
+		localIPv6 = localIPv6s[0]
+	}
+
+	var out []dns.RR
+	wantA := qtype == dns.TypeA || qtype == dns.TypeANY
+	wantAAAA := qtype == dns.TypeAAAA || qtype == dns.TypeANY
+	if wantA {
+		ips := localIps
+		if len(ips) == 0 && localIp != "" {
+			ips = []string{localIp}
+		}
+		for _, s := range ips {
+			if ip := net.ParseIP(s); ip != nil && ip.To4() != nil {
+				out = append(out, &dns.A{
+					Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+					A:   ip,
+				})
+			}
+		}
+	}
+	if wantAAAA {
+		ips := localIPv6s
+		if len(ips) == 0 && localIPv6 != "" {
+			ips = []string{localIPv6}
+		}
+		for _, s := range ips {
+			if ip := net.ParseIP(s); ip != nil && ip.To4() == nil {
+				out = append(out, &dns.AAAA{
+					Hdr:  dns.RR_Header{Name: qname, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 60},
+					AAAA: ip,
+				})
+			}
+		}
+	}
+	return out
+}
+
 // isDomainBlocked checks whether a domain should be blocked by DNS filtering.
 // A domain is blocked when:
 //  1. It appears in ANY domain list referenced by dns_domain_lists, AND
@@ -518,8 +732,7 @@ func isDomainBlocked(domain string) bool {
 		return blocked
 	}
 
-	// Check blocklists
-	blockListIDs := getDomainListIDs("dns_domain_lists")
+	blockListIDs := loadCachedListIDs(cachedBlockListIDs)
 	if len(blockListIDs) == 0 {
 		return false
 	}
@@ -527,8 +740,7 @@ func isDomainBlocked(domain string) bool {
 		return false
 	}
 
-	// Check whitelists — if the domain is whitelisted, it's not blocked
-	whitelistIDs := getDomainListIDs("dns_whitelist_domain_lists")
+	whitelistIDs := loadCachedListIDs(cachedAllowListIDs)
 	if len(whitelistIDs) > 0 && domainListMgr.Index.IsDomainInAnyList(domain, whitelistIDs) {
 		return false
 	}
@@ -572,8 +784,24 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	for _, q := range r.Question {
-		domain := strings.ToLower(q.Name)
-		domain = domain[:len(domain)-1] // Strip trailing dot
+		domain := strings.ToLower(strings.TrimSuffix(q.Name, "."))
+		if domain == "" {
+			continue
+		}
+
+		// This host (all NICs) before the device store, which may only know one IP.
+		if isApplianceName(domain) {
+			if answers := selfAnswers(q.Name, q.Qtype); len(answers) > 0 {
+				response := new(dns.Msg)
+				response.SetRcode(r, dns.RcodeSuccess)
+				response.Authoritative = true
+				response.Answer = answers
+				logger.LogDNS(domain, "dns", "self")
+				emitRequestEvent(domain, dns.TypeToString[q.Qtype], "self", false)
+				w.WriteMsg(response)
+				return
+			}
+		}
 
 		// --- 1. Device store lookup (supports A, AAAA, PTR) ---
 		// The device store has its own RWMutex — no need to hold the shared mutex.
@@ -613,19 +841,15 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// return our own IP so the client fetches the PAC file from us.
 		// This enables automatic proxy configuration for all network clients
 		// without requiring DHCP option 252.
-		if wpadEnabled.Load() && q.Qtype == dns.TypeA {
+		if wpadEnabled.Load() {
 			lowerDomain := strings.ToLower(domain)
 			if lowerDomain == "wpad" || strings.HasPrefix(lowerDomain, "wpad.") {
-				if localIp != "" {
+				if answers := selfAnswers(q.Name, q.Qtype); len(answers) > 0 {
 					dnsMetrics.QueriesWPAD.Add(1)
-					log.Printf("[DNS] WPAD intercept: %s → %s", domain, localIp)
 					response := new(dns.Msg)
 					response.SetRcode(r, dns.RcodeSuccess)
 					response.Authoritative = true
-					response.Answer = append(response.Answer, &dns.A{
-						Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-						A:   net.ParseIP(localIp),
-					})
+					response.Answer = answers
 					logger.LogDNS(domain, "dns", "wpad")
 					emitRequestEvent(domain, dns.TypeToString[q.Qtype], "wpad", false)
 					w.WriteMsg(response)
@@ -638,7 +862,6 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// Internal records and exception domains still use the legacy maps
 		// protected by the shared mutex.
 		mutex.RLock()
-		internalRecordsLen := len(internalRecords)
 		isException := exceptionDomains[domain]
 		internalIP, isInternal := internalRecords[domain]
 		mutex.RUnlock()
@@ -647,9 +870,6 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// The index has its own RWMutex — no need to hold the legacy mutex.
 		isBlocked := isDomainBlocked(domain)
 
-		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", internalRecordsLen)
-
-		// LogQuery(domain)
 		if isException {
 			dnsMetrics.QueriesException.Add(1)
 			log.Println("Domain is exception : ", domain)
@@ -671,15 +891,15 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			return
 		} else if isBlocked && dnsFilteringEnabled.Load() {
 			dnsMetrics.QueriesBlocked.Add(1)
-			log.Println("[DNS] Domain is blocked : ", domain)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)
-			// Return GateSentry's own IP so the browser connects to us
-			// and we can serve a "blocked" page instead of a connection error
-			response.Answer = append(response.Answer, &dns.A{
-				Hdr: dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-				A:   net.ParseIP(localIp),
-			})
+			response.Answer = selfAnswers(domain+".", q.Qtype)
+			if len(response.Answer) == 0 && localIp != "" {
+				response.Answer = append(response.Answer, &dns.A{
+					Hdr: dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+					A:   net.ParseIP(localIp),
+				})
+			}
 			logger.LogDNS(domain, "dns", "blocked")
 			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "blocked", true)
 			w.WriteMsg(response)
@@ -702,24 +922,23 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		}
 
-		logger.LogDNS(domain, "dns", "forward")
-
-		// Cache miss — forward to external resolver.
-		// Forward request WITHOUT holding the mutex - this is the key fix!
-		// External DNS queries can take time and should not block other requests
-		// Detect if client connected via TCP and preserve that for forwarding
+		// Cache miss — forward to external resolver (no mutex held).
 		useTCP := w.LocalAddr().Network() == "tcp"
 		resp, err := forwardDNSRequest(r, useTCP)
 		if err != nil {
 			dnsMetrics.QueriesError.Add(1)
-			log.Println("[DNS] Error forwarding DNS request:", err)
-			// Send SERVFAIL response instead of silently dropping the request.
+			if dnsResponseCache != nil {
+				dnsResponseCache.PutFailure(q.Name, q.Qtype, dns.RcodeServerFailure)
+			}
+			logger.LogDNS(domain, "dns", "error")
 			errMsg := new(dns.Msg)
 			errMsg.SetRcode(r, dns.RcodeServerFailure)
 			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "error", false)
 			w.WriteMsg(errMsg)
 			return
 		}
+
+		logger.LogDNS(domain, "dns", "forward")
 
 		// Cache the upstream response for future queries.
 		if dnsResponseCache != nil {
@@ -731,12 +950,8 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// Phase 4: Propagate the upstream rcode (NXDOMAIN, NOERROR, etc.)
 		// and copy answers + authority section (contains SOA for negative responses).
 		m.Rcode = resp.Rcode
-		for _, answer := range resp.Answer {
-			m.Answer = append(m.Answer, answer)
-		}
-		for _, ns := range resp.Ns {
-			m.Ns = append(m.Ns, ns)
-		}
+		m.Answer = append(m.Answer, resp.Answer...)
+		m.Ns = append(m.Ns, resp.Ns...)
 	}
 	w.WriteMsg(m)
 }
@@ -748,28 +963,35 @@ func isReverseDomain(domain string) bool {
 }
 
 func forwardDNSRequest(r *dns.Msg, useTCP bool) (*dns.Msg, error) {
-	c := new(dns.Client)
-	c.Timeout = 3 * time.Second // Explicit timeout to prevent hanging under concurrent load
+	if circuitIsOpen() {
+		return nil, fmt.Errorf("upstream circuit open")
+	}
+	if !tryAcquireForward() {
+		return nil, fmt.Errorf("too many in-flight upstream queries")
+	}
+	defer releaseForward()
 
-	// Use TCP if requested (e.g., client connected via TCP)
+	c := new(dns.Client)
+	c.Timeout = 3 * time.Second
+
 	if useTCP {
 		c.Net = "tcp"
 	}
 
-	resp, rtt, err := c.Exchange(r, externalResolver)
+	upstream := resolverForMsg(r)
+	resp, rtt, err := c.Exchange(r, upstream)
 	if rtt > 0 {
 		dnsMetrics.UpstreamDuration.Observe(rtt)
 	}
 	if err != nil {
+		noteUpstreamFailure()
 		return nil, err
 	}
+	noteUpstreamSuccess()
 
-	// If response is truncated and we used UDP, retry with TCP
-	// This handles cases where upstream response is too large for UDP
 	if resp.Truncated && !useTCP {
-		log.Println("[DNS] Response truncated, retrying with TCP")
 		c.Net = "tcp"
-		tcpResp, tcpRTT, tcpErr := c.Exchange(r, externalResolver)
+		tcpResp, tcpRTT, tcpErr := c.Exchange(r, upstream)
 		if tcpRTT > 0 {
 			dnsMetrics.UpstreamDuration.Observe(tcpRTT)
 		}

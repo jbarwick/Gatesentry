@@ -55,8 +55,17 @@ var errSSRFBlocked = errors.New("connection to loopback or link-local address bl
 var ip6Loopback = net.ParseIP("::1")
 
 var dialer = &net.Dialer{
-	Timeout:   30 * time.Second,
-	KeepAlive: 30 * time.Second,
+	Timeout:       30 * time.Second,
+	KeepAlive:     30 * time.Second,
+	FallbackDelay: 300 * time.Millisecond,
+}
+
+func isNoRouteErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "network is unreachable") || strings.Contains(s, "no route to host")
 }
 
 func init() {
@@ -161,7 +170,7 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 }
 
 var httpTransport = &http.Transport{
-	Proxy:                 http.ProxyFromEnvironment,
+	Proxy:                 nil, // never inherit HTTP_PROXY — that loops through ourselves
 	DialContext:           safeDialContext,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
@@ -242,7 +251,6 @@ func (p *GSProxy) RunAuthHandler(authheader string) bool {
 
 func InitProxy() {
 	CreateBlockedImageBytes()
-	MaxContentScanSize = 1e7 // 10MB for low-spec hardware
 }
 
 type ProxyHandler struct {
@@ -678,7 +686,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	Metrics.UpstreamDuration.Observe(time.Since(upstreamStart))
 	if err != nil {
 		Metrics.ErrorsUpstream.Add(1)
-		log.Printf("error fetching %s: %s", r.URL, err)
+		if DebugLogging || !isNoRouteErr(err) {
+			log.Printf("error fetching %s: %s", r.URL, err)
+		}
 		errorData := &GSProxyErrorData{Error: err.Error()}
 		IProxy.ProxyErrorHandler(errorData)
 		// Transport errors (upstream unreachable, malformed response, TLS failure)

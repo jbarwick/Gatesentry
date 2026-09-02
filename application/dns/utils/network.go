@@ -3,6 +3,7 @@ package gatesentryDnsUtils
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
 // GetLocalIP returns the local IPv4 address that the OS would use to reach
@@ -58,4 +59,82 @@ func GetLocalIP() (string, error) {
 		return fallback, nil
 	}
 	return "", fmt.Errorf("no local IPv4 address found")
+}
+
+func skipIface(iface net.Interface) bool {
+	if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+		return true
+	}
+	name := strings.ToLower(iface.Name)
+	return strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "br-") || name == "docker0"
+}
+
+// GetLocalIPs returns IPv4 addresses on host interfaces that are UP and
+// have carrier (FlagRunning). Disconnected NICs are omitted so DNS does
+// not advertise addresses that other machines cannot reach.
+func GetLocalIPs() []string {
+	return collectIPs(false)
+}
+
+// GetLocalIPv6s returns unique-local/global IPv6 addresses on host
+// interfaces that are UP and have carrier, excluding link-local.
+func GetLocalIPv6s() []string {
+	return collectIPs(true)
+}
+
+func collectIPs(v6 bool) []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var running []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		running = append(running, s)
+	}
+	for _, iface := range ifaces {
+		if skipIface(iface) {
+			continue
+		}
+		// No carrier → address is local-only; other hosts cannot ping it.
+		if iface.Flags&net.FlagRunning == 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipnet.IP
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if v6 {
+				if ip.To4() != nil || ip.IsLinkLocalUnicast() {
+					continue
+				}
+			} else if ip.To4() == nil {
+				continue
+			}
+			add(ip.String())
+		}
+	}
+	return running
+}
+
+// GetLocalIPv6 returns the preferred IPv6 address (first running ULA, else any).
+func GetLocalIPv6() (string, error) {
+	ips := GetLocalIPv6s()
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no local IPv6 address found")
+	}
+	return ips[0], nil
 }

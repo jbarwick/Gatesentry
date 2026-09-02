@@ -3,6 +3,7 @@ package cache
 import (
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,8 +59,8 @@ type subscriber struct {
 type EventBus struct {
 	mu          sync.RWMutex
 	subscribers map[*subscriber]struct{}
-	bufSize     int  // per-subscriber channel buffer size
-	enabled     bool // when false, Emit is a no-op (zero overhead if no UI connected)
+	bufSize     int         // per-subscriber channel buffer size
+	enabled     atomic.Bool // when false, Emit is a no-op
 }
 
 // DefaultBufSize is the per-subscriber event channel buffer.
@@ -75,7 +76,6 @@ func NewEventBus() *EventBus {
 	return &EventBus{
 		subscribers: make(map[*subscriber]struct{}),
 		bufSize:     DefaultBufSize,
-		enabled:     false,
 	}
 }
 
@@ -90,7 +90,7 @@ func (eb *EventBus) Subscribe() chan *Event {
 		ch: make(chan *Event, eb.bufSize),
 	}
 	eb.subscribers[sub] = struct{}{}
-	eb.enabled = true
+	eb.enabled.Store(true)
 
 	return sub.ch
 }
@@ -114,7 +114,7 @@ func (eb *EventBus) Unsubscribe(ch chan *Event) {
 
 	// Auto-disable when no subscribers (saves overhead)
 	if len(eb.subscribers) == 0 {
-		eb.enabled = false
+		eb.enabled.Store(false)
 	}
 }
 
@@ -123,7 +123,7 @@ func (eb *EventBus) Unsubscribe(ch chan *Event) {
 // When disabled (no subscribers), this is a fast no-op.
 func (eb *EventBus) Emit(event *Event) {
 	// Fast path: no subscribers — avoid lock entirely
-	if !eb.enabled {
+	if !eb.enabled.Load() {
 		return
 	}
 
@@ -154,9 +154,7 @@ func (eb *EventBus) SubscriberCount() int {
 // Enable turns on event emission even without subscribers.
 // Useful for testing or pre-warming.
 func (eb *EventBus) Enable() {
-	eb.mu.Lock()
-	eb.enabled = true
-	eb.mu.Unlock()
+	eb.enabled.Store(true)
 }
 
 // ---------- Event constructors (convenience) ----------

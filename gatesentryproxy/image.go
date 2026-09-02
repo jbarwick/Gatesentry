@@ -18,12 +18,18 @@ var blocked_image []byte
 
 func CreateBlockedImageBytes() {
 	log.Println("[IMAGE] Creating blocked image bytes")
-	// read image from disk
 	image_file, err := os.Open("blocked.jpg")
 	if err != nil {
-		log.Println("[IMAGE] Error opening image file:", err)
+		log.Printf("[IMAGE] blocked.jpg not found (%v); generating fallback", err)
+		generated, genErr := createImageWithText([]string{"Blocked by GateSentry"})
+		if genErr != nil {
+			log.Println("[IMAGE] Error generating fallback image:", genErr)
+			return
+		}
+		blocked_image = generated
 		return
 	}
+	defer image_file.Close()
 
 	// decode jpeg into image.Image
 	image_file_jpeg, err := jpeg.Decode(image_file)

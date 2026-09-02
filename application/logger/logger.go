@@ -15,6 +15,17 @@ import (
 var Log_Entry_Expires = time.Second * 3600 * 24 * 7
 var Commit_Interval = time.Second * 60
 
+const (
+	logQueueSize = 256
+	maxLogScan   = 20000
+)
+
+type logWrite struct {
+	key   string
+	value string
+	entry LogEntry
+}
+
 type Log struct {
 	Database *buntdb.DB
 	// DataCache
@@ -24,6 +35,9 @@ type Log struct {
 	// SSE subscriber support
 	mu          sync.RWMutex
 	subscribers map[chan LogEntry]struct{}
+
+	writeCh chan logWrite
+	stopCh  chan struct{}
 }
 
 // Subscribe returns a channel that receives new log entries in real-time.
@@ -90,40 +104,33 @@ func NewLogger(LogLocation string) *Log {
 	log.Println("Creating a new log file = " + LogLocation)
 	db, err := buntdb.Open(LogLocation)
 	if err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
-		return nil
+		log.Printf("[Logger] open error: %v", err)
+		l := &Log{writeCh: make(chan logWrite, 1), stopCh: make(chan struct{})}
+		return l
 	}
 	var config buntdb.Config
 	if err := db.ReadConfig(&config); err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
-		return nil
+		log.Printf("[Logger] read config error: %v", err)
 	}
 	config.SyncPolicy = buntdb.Never
 	if err := db.SetConfig(config); err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
-		return nil
-	}
-	if err := db.ReadConfig(&config); err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
-		return nil
+		log.Printf("[Logger] set config error: %v", err)
 	}
 	// fmt.Println( config );
 	// if err != nil {
 	// 	log.Println("GS-LOGGER ERROR" + err.Error())
 	// }
 	db.CreateIndex("entries", "*", buntdb.IndexJSON("time"))
-	// defer db.Close()
 
 	l := &Log{}
 	l.Database = db
 	l.LogLocation = LogLocation
 	l.LastCommitTime = time.Now()
+	l.writeCh = make(chan logWrite, logQueueSize)
+	l.stopCh = make(chan struct{})
 
-	// Shrink the database on startup to purge expired entries and reclaim disk space
+	go l.writerLoop()
+
 	go func() {
 		log.Println("[Logger] Running startup database shrink...")
 		if err := db.Shrink(); err != nil {
@@ -133,16 +140,20 @@ func NewLogger(LogLocation string) *Log {
 		}
 	}()
 
-	// Periodic maintenance: shrink every 6 hours
 	go func() {
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			log.Println("[Logger] Running periodic database shrink...")
-			if err := db.Shrink(); err != nil {
-				log.Println("[Logger] Periodic shrink error:", err)
-			} else {
-				log.Println("[Logger] Periodic shrink complete")
+		for {
+			select {
+			case <-l.stopCh:
+				return
+			case <-ticker.C:
+				log.Println("[Logger] Running periodic database shrink...")
+				if err := db.Shrink(); err != nil {
+					log.Println("[Logger] Periodic shrink error:", err)
+				} else {
+					log.Println("[Logger] Periodic shrink complete")
+				}
 			}
 		}
 	}()
@@ -150,68 +161,80 @@ func NewLogger(LogLocation string) *Log {
 	return l
 }
 
+func (L *Log) writerLoop() {
+	for {
+		select {
+		case <-L.stopCh:
+			return
+		case w := <-L.writeCh:
+			if L.Database == nil {
+				continue
+			}
+			_ = L.Database.Update(func(tx *buntdb.Tx) error {
+				_, _, err := tx.Set(w.key, w.value, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
+				L.Commit(tx)
+				return err
+			})
+			L.broadcast(w.entry)
+		}
+	}
+}
+
+func (L *Log) Close() {
+	if L == nil {
+		return
+	}
+	select {
+	case <-L.stopCh:
+	default:
+		close(L.stopCh)
+	}
+	if L.Database != nil {
+		_ = L.Database.Close()
+		L.Database = nil
+	}
+}
+
+func (L *Log) enqueue(entry LogEntry) {
+	if L == nil || L.writeCh == nil {
+		return
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	timestring := gatesentry2utils.Int64toString(entry.Time)
+	w := logWrite{
+		key:   gatesentry2utils.RandomString(25) + timestring,
+		value: string(payload),
+		entry: entry,
+	}
+	select {
+	case L.writeCh <- w:
+	default:
+		// queue full — drop rather than spawning unbounded goroutines
+	}
+}
+
 func (L *Log) LogDNS(domain string, user string, responseType string) {
-	ip := user
-	// url:=url;
-	go func() {
-		now := time.Now()
-		secs := now.Unix()
-		_ = secs
-
-		timestring := gatesentry2utils.Int64toString(secs)
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + domain + `","type":"dns", "dnsResponseType":"` + responseType + `"}`
-		key := gatesentry2utils.RandomString(25) + timestring
-
-		err := L.Database.Update(func(tx *buntdb.Tx) error {
-			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
-			L.Commit(tx)
-			return err
-		})
-		// fmt.Println( err );
-		_ = err
-
-		// Broadcast to SSE subscribers
-		L.broadcast(LogEntry{
-			Time:            secs,
-			IP:              ip,
-			URL:             domain,
-			Type:            "dns",
-			DNSResponseType: responseType,
-		})
-	}()
+	L.enqueue(LogEntry{
+		Time:            time.Now().Unix(),
+		IP:              user,
+		URL:             domain,
+		Type:            "dns",
+		DNSResponseType: responseType,
+	})
 }
 
 func (L *Log) LogProxy(url string, user string, actionType string, ruleName string) {
-	ip := user
-	go func() {
-		now := time.Now()
-		secs := now.Unix()
-
-		timestring := gatesentry2utils.Int64toString(secs)
-		ruleField := ""
-		if ruleName != "" {
-			ruleField = `, "ruleName":"` + ruleName + `"`
-		}
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `", "type":"proxy", "proxyResponseType":"` + actionType + `"` + ruleField + `}`
-		key := gatesentry2utils.RandomString(25) + timestring
-
-		err := L.Database.Update(func(tx *buntdb.Tx) error {
-			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
-			L.Commit(tx)
-			return err
-		})
-		_ = err
-
-		// Broadcast to SSE subscribers
-		L.broadcast(LogEntry{
-			Time:              secs,
-			IP:                ip,
-			URL:               url,
-			Type:              "proxy",
-			ProxyResponseType: actionType,
-			RuleName:          ruleName,
-		})
-	}()
+	L.enqueue(LogEntry{
+		Time:              time.Now().Unix(),
+		IP:                user,
+		URL:               url,
+		Type:              "proxy",
+		ProxyResponseType: actionType,
+		RuleName:          ruleName,
+	})
 }
 
 func (L *Log) GetLog() string {
@@ -312,13 +335,17 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (i
 	from := gatesentry2utils.Int64toString(fromtime)
 	to := gatesentry2utils.Int64toString(totime)
 
-	log.Println("[LogViewer] Viewing from " + from + " to " + to)
+	scanned := 0
 
 	L.Database.View(func(tx *buntdb.Tx) error {
 		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
+			scanned++
+			if scanned > maxLogScan {
+				return false
+			}
 			var logEntry LogEntry
 			if err := json.Unmarshal([]byte(value), &logEntry); err != nil {
-				return true // Continue iterating
+				return true
 			}
 
 			if logEntry.Type != "dns" && logEntry.Type != "proxy" {

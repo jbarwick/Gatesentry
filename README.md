@@ -2,10 +2,33 @@
 
 An open source proxy server (supports SSL filtering / MITM) + DNS Server with a nice frontend.
 
+**This checkout is the v2 branch**, not v1 / 1.2. Development and image builds use **`2.0.0-beta.1`**. The last production container on monster-jj was `2.0.0-alpha.15` until this beta is published.
+
 ![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)
 
 
 [Download the latest release](https://github.com/fifthsegment/Gatesentry/releases)
+
+## This repo vs `../gatesentry-synology`
+
+There are two directories next to each other. They are not two versions of the same app.
+
+| Path | What it is | Role |
+|------|------------|------|
+| **`Gatesentry` (this repo, branch `v2`)** | Go + Svelte application, Dockerfile, tests, `docker-publish.sh` | **Source of truth.** Build images here. All v2 work happens here. |
+| **`../gatesentry-synology`** | A single `docker-compose.yml` for the Synology NAS | **Deploy overlay only** (host networking, NAS volume path, port 53, admin port). It does not contain application code. |
+
+**Use this project** for code, builds, and publishing. **Use a Synology compose file** only to run the published image on monster-jj.
+
+`../gatesentry-synology/docker-compose.yml` is kept in sync with the NAS layout and currently pins **`gatesentry:2.0.0-beta.1`**. The **live** compose on the NAS is `/volume1/docker/Gatesentry/docker-compose.yml` (last running image was `2.0.0-alpha.15` until this beta is published). Typical env:
+
+- `network_mode: host`
+- volume `/volume1/docker/Gatesentry/gatesentry`
+- `GS_ADMIN_PORT=9876`, `GS_BASE_PATH=/gatesentry`, `GATESENTRY_DNS_PORT=53`, `TZ=Asia/Singapore`
+
+Do not deploy from this repo's root `docker-compose.yml` onto the NAS (it uses bridge ports and admin 8080). Do not start the stale `1.20.6.1` overlay. After a new v2 image is published, bump the image tag in the NAS compose (and sync `../gatesentry-synology` so it matches).
+
+Production admin UI: **`http://monster-jj:9876/gatesentry/`** (metrics: `http://monster-jj:9876/metrics`). Do not use `http://monster-jj.jvj28.com` — that hostname is HTTPS-redirected by the NAS web server and never reaches GateSentry. When DNS is unhealthy, use `http://192.168.1.91:9876/gatesentry/` and bypass the proxy.
 
 Usages:
 

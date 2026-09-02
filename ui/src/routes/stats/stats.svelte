@@ -36,7 +36,7 @@
     { id: "24h", text: "Past 24 hours" },
     { id: "1h", text: "Past hour" },
   ];
-  let selectedScale = "7d";
+  let selectedScale = "24h";
 
   let chart: any = null;
   let chartHolder: HTMLElement;

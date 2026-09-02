@@ -1,8 +1,31 @@
 package domainlist
 
 import (
+	"strings"
 	"sync"
 )
+
+// parentDomains returns the domain and its parents down to 2 labels
+// (example.com), skipping the public TLD (com).
+func parentDomains(domain string) []string {
+	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+	if domain == "" {
+		return nil
+	}
+	out := []string{domain}
+	for {
+		i := strings.IndexByte(domain, '.')
+		if i < 0 {
+			break
+		}
+		domain = domain[i+1:]
+		if !strings.Contains(domain, ".") {
+			break
+		}
+		out = append(out, domain)
+	}
+	return out
+}
 
 // DomainListIndex provides O(1) domain lookup across all loaded domain lists.
 // It maps each domain to the set of list IDs that contain it.
@@ -29,26 +52,29 @@ func (idx *DomainListIndex) IsDomainInList(domain string, listID string) bool {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	lists, ok := idx.domains[domain]
-	if !ok {
-		return false
+	for _, d := range parentDomains(domain) {
+		if lists, ok := idx.domains[d]; ok && lists[listID] {
+			return true
+		}
 	}
-	return lists[listID]
+	return false
 }
 
-// IsDomainInAnyList checks whether a domain is present in ANY of the given lists.
-// Returns true on first match. Thread-safe for concurrent reads.
+// IsDomainInAnyList checks whether a domain (or a parent zone) is present in
+// ANY of the given lists. Returns true on first match.
 func (idx *DomainListIndex) IsDomainInAnyList(domain string, listIDs []string) bool {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	lists, ok := idx.domains[domain]
-	if !ok {
-		return false
-	}
-	for _, id := range listIDs {
-		if lists[id] {
-			return true
+	for _, d := range parentDomains(domain) {
+		lists, ok := idx.domains[d]
+		if !ok {
+			continue
+		}
+		for _, id := range listIDs {
+			if lists[id] {
+				return true
+			}
 		}
 	}
 	return false

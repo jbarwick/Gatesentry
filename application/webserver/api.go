@@ -1,9 +1,17 @@
 package gatesentryWebserver
 
 import (
+	"context"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
+)
+
+var (
+	adminServerMu sync.Mutex
+	adminServer   *http.Server
 )
 
 type GsWeb struct {
@@ -99,5 +107,27 @@ func (g *GsWeb) Delete(path string, handlerOrMiddleware interface{}, optionalHan
 }
 
 func (g *GsWeb) ListenAndServe(port string) error {
-	return http.ListenAndServe(port, g.router)
+	srv := &http.Server{
+		Addr:              port,
+		Handler:           g.router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		// WriteTimeout left unset so SSE streams are not killed.
+	}
+	adminServerMu.Lock()
+	adminServer = srv
+	adminServerMu.Unlock()
+	return srv.ListenAndServe()
+}
+
+// ShutdownAdmin stops the admin HTTP server. Safe if it was never started.
+func ShutdownAdmin(ctx context.Context) error {
+	adminServerMu.Lock()
+	srv := adminServer
+	adminServerMu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Shutdown(ctx)
 }

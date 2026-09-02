@@ -23,6 +23,9 @@ func FetchDomainsFromURL(url string) ([]string, error) {
 
 	client := &http.Client{
 		Timeout: 60 * time.Second,
+		Transport: &http.Transport{
+			Proxy: nil,
+		},
 	}
 
 	resp, err := client.Get(url)

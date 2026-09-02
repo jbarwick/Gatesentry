@@ -545,6 +545,7 @@ func doLiveFetch(targetURL string) (statusCode int, contentType string, body str
 			return nil
 		},
 		Transport: &http.Transport{
+			Proxy:           nil,
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}

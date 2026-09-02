@@ -42,7 +42,7 @@ var unverifiedClientConfig = &tls.Config{
 
 var insecureHTTPTransport = &http.Transport{
 	TLSClientConfig:       unverifiedClientConfig,
-	Proxy:                 http.ProxyFromEnvironment,
+	Proxy:                 nil,
 	DialContext:           safeDialContext,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,

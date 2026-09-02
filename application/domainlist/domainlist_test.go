@@ -48,8 +48,11 @@ func TestIndexAddAndLookup(t *testing.T) {
 	if !idx.IsDomainInList("malware.bad.org", "list1") {
 		t.Error("expected malware.bad.org to be in list1")
 	}
-	if idx.IsDomainInList("clean.example.com", "list1") {
-		t.Error("expected clean.example.com NOT to be in list1")
+	if !idx.IsDomainInList("www.example.com", "list1") {
+		t.Error("expected www.example.com to match parent example.com")
+	}
+	if idx.IsDomainInList("not-example.org", "list1") {
+		t.Error("expected not-example.org NOT to be in list1")
 	}
 }
 
@@ -66,6 +69,7 @@ func TestIndexIsDomainInAnyList(t *testing.T) {
 		want    bool
 	}{
 		{"tracker.com", []string{"ads", "malware"}, true},
+		{"www.tracker.com", []string{"ads"}, true},
 		{"evil.org", []string{"ads", "malware"}, true},
 		{"facebook.com", []string{"ads", "malware"}, false},
 		{"facebook.com", []string{"social"}, true},
