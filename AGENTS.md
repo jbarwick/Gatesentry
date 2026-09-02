@@ -7,17 +7,17 @@ Important context for AI agents working on this project.
 - **Active development is `v2`** (this checkout tracks `myfork/v2`). Do not treat origin/master or v1.20.x / "1.2" as the working tree.
 - Upstream: `origin` = https://github.com/fifthsegment/Gatesentry.git
 - Fork: `myfork` = https://github.com/jbarwick/Gatesentry.git
-- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.1`). Production on monster-jj may still be `2.0.0-alpha.15` until the beta image is published.
+- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.3`). Production on monster-jj is `2.0.0-beta.2` until this image is published.
 
 ## Which tree to use for deployments
 
 | Location | What it is | Use for |
 |----------|------------|---------|
-| **This repo (`Gatesentry`, branch `v2`)** | Application source, Dockerfile, tests, `docker-publish.sh` | All code, image builds, v2 features (`2.0.0-beta.1`) |
+| **This repo (`Gatesentry`, branch `v2`)** | Application source, Dockerfile, tests, `docker-publish.sh` | All code, image builds, v2 features (`2.0.0-beta.3`) |
 | **`../gatesentry-synology`** | One-file Synology compose overlay | NAS-specific volume/network/env. Synced to `2.0.0-beta.1` + `GATESENTRY_DNS_RESOLVER`. |
 | **`/volume1/docker/Gatesentry/` on monster-jj** | Live production compose + data volume | Actual deploy. Last running image was `2.0.0-alpha.15`; bump to `2.0.0-beta.1` after publish. |
 
-**Use this v2 project to build and publish images. Deploy with the NAS compose (host network, port 53, admin 9876, data on `/volume1/docker/Gatesentry/gatesentry`), not with this repo's default `docker-compose.yml` (bridged ports, admin 8080).** After publishing a new image, update the image tag in `/volume1/docker/Gatesentry/docker-compose.yml` (and sync `../gatesentry-synology` so it does not drift back to 1.20.6.1).
+**Use this v2 project to build and publish images. Deploy on monster-jj with the NAS compose** (host network, port 53, admin 9876, data on `/volume1/docker/Gatesentry/gatesentry`), **not** with this repo's public samples: `docker-compose.yml` (bridged 8080/10053) or `docker-compose.host.yml` (generic host-network, admin 8080). After publishing a new image, update the image tag in `/volume1/docker/Gatesentry/docker-compose.yml` (and sync `../gatesentry-synology` so it does not drift).
 
 ## Deployment Target
 

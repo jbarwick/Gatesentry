@@ -1,196 +1,233 @@
-# Gatesentry
+# GateSentry
 
-An open source proxy server (supports SSL filtering / MITM) + DNS Server with a nice frontend.
+An open-source DNS filter, HTTPS-inspecting proxy, and parental-control appliance with a web admin UI.
 
-**This checkout is the v2 branch**, not v1 / 1.2. Development and image builds use **`2.0.0-beta.1`**. The last production container on monster-jj was `2.0.0-alpha.15` until this beta is published.
+**This is the v2 branch** (`2.0.0-beta.3`), a fork of [fifthsegment/Gatesentry](https://github.com/fifthsegment/Gatesentry). Filtering is rule-based (Allow or Block, per user) rather than a pile of global lists. Pre-release: APIs and settings may still change.
 
-![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)
-
-
-[Download the latest release](https://github.com/fifthsegment/Gatesentry/releases)
-
-## This repo vs `../gatesentry-synology`
-
-There are two directories next to each other. They are not two versions of the same app.
-
-| Path | What it is | Role |
-|------|------------|------|
-| **`Gatesentry` (this repo, branch `v2`)** | Go + Svelte application, Dockerfile, tests, `docker-publish.sh` | **Source of truth.** Build images here. All v2 work happens here. |
-| **`../gatesentry-synology`** | A single `docker-compose.yml` for the Synology NAS | **Deploy overlay only** (host networking, NAS volume path, port 53, admin port). It does not contain application code. |
-
-**Use this project** for code, builds, and publishing. **Use a Synology compose file** only to run the published image on monster-jj.
-
-`../gatesentry-synology/docker-compose.yml` is kept in sync with the NAS layout and currently pins **`gatesentry:2.0.0-beta.1`**. The **live** compose on the NAS is `/volume1/docker/Gatesentry/docker-compose.yml` (last running image was `2.0.0-alpha.15` until this beta is published). Typical env:
-
-- `network_mode: host`
-- volume `/volume1/docker/Gatesentry/gatesentry`
-- `GS_ADMIN_PORT=9876`, `GS_BASE_PATH=/gatesentry`, `GATESENTRY_DNS_PORT=53`, `TZ=Asia/Singapore`
-
-Do not deploy from this repo's root `docker-compose.yml` onto the NAS (it uses bridge ports and admin 8080). Do not start the stale `1.20.6.1` overlay. After a new v2 image is published, bump the image tag in the NAS compose (and sync `../gatesentry-synology` so it matches).
-
-Production admin UI: **`http://monster-jj:9876/gatesentry/`** (metrics: `http://monster-jj:9876/metrics`). Do not use `http://monster-jj.jvj28.com` — that hostname is HTTPS-redirected by the NAS web server and never reaches GateSentry. When DNS is unhealthy, use `http://192.168.1.91:9876/gatesentry/` and bypass the proxy.
-
-Usages:
-
-- Privacy Protection: Users can use Gatesentry to prevent tracking by various online services by blocking tracking scripts and cookies.
-
-- Parental Controls: Parents can configure Gatesentry to block inappropriate content or websites for younger users on the network.
-
-- Bandwidth Management: By blocking unnecessary content like ads or heavy scripts, users can save on bandwidth, which is especially useful for limited data plans.
-
-- Enhanced Security: Gatesentry can be used to block known malicious websites or phishing domains, adding an extra layer of security to the network.
-
-- Access Control: In a corporate or institutional setting, Gatesentry can be used to restrict access to non-work-related sites during work hours.
-
-- Logging and Monitoring: Track and monitor all the requests made in the network to keep an eye on suspicious activities or to analyze network usage patterns.
-
-- Custom Redirects (via DNS): Redirect specific URLs to other addresses, useful for local development or for redirecting deprecated domains.
+[Release notes](https://github.com/jbarwick/Gatesentry/releases/tag/v2.0.0-beta.3) · [RFC to upstream](https://github.com/fifthsegment/Gatesentry/pull/141)
 
 ![gatesentry-repo](https://github.com/fifthsegment/Gatesentry/assets/5513549/5ab836ab-7362-4916-9f7c-655e67e4deab)
 
-## Getting started
+Typical uses: ad / tracker blocking, parental controls, bandwidth saving, phishing-domain blocking, work-hours access control, request logging, and local DNS redirects.
 
-There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly.
+---
 
-### Method 1: Using Docker
+## Requirements
 
-1. Use the [docker-compose.yml](https://github.com/fifthsegment/Gatesentry/blob/master/docker-compose.yml) file from the root of this repo as a template, copy and paste it to any directory on your computer, then run the following command in a terminal `docker compose up`
+| What | Version | Notes |
+|------|---------|--------|
+| **Go** | 1.24+ | Matches `go.mod` |
+| **Node.js** | 18+ | Builds the Svelte admin UI |
+| **Docker Engine + Compose v2** | optional | Recommended way to run it |
+| **Linux** | — | Primary target (transparent proxy and TPROXY are Linux-only) |
 
-### Method 2: Using the Gatesentry binary directly
+The Docker image is **runtime-only**: it copies a binary you already built with `./build.sh`. There is no pre-built `2.0.0-beta.3` image on Docker Hub yet (`jbarwick/gatesentry:latest` is still `2.0.0-alpha.15`).
 
-1.  Downloading Gatesentry:
+---
 
-    Navigate to the 'Releases' section of this repository.
-    Identify and download the appropriate file for your operating system, named either gatesentry-linux or gatesentry-mac.
+## Install from source (Docker)
 
-2.  Installation:
+This is the path for running GateSentry on your own server.
 
-    **For macOS and Linux:**
+```bash
+git clone https://github.com/jbarwick/Gatesentry.git
+cd Gatesentry
+git checkout v2.0.0-beta.3   # or: git checkout v2
 
-    Locate the downloaded Gatesentry binary file in your system.
-    Open a terminal window and navigate to the directory containing the downloaded binary.
-    Run the following command to grant execution permissions to the binary file:
+# First time only — UI toolchain
+cd ui && npm install && cd ..
 
-        chmod +x gatesentry-{platform}
+# Build Svelte UI, embed it, compile a static Go binary → bin/gatesentrybin
+./build.sh
 
-    Replace `{platform}` with your operating system (linux or mac).
-    Proceed to execute the binary file to initiate the server.
+# Start the container (bridged ports, no root DNS port)
+docker compose up -d --build
+# older engines / Synology: docker-compose up -d --build
+```
 
-    **Running as a Service (Optional)**
+Admin UI: **http://localhost:8080/**  
+Default login: **`admin` / `admin`** — change this immediately.
 
-    If you want Gatesentry to keep running in the background on your machine, install it as :
+DNS on this first-run compose is **UDP/TCP 10053** (so it does not fight systemd-resolved on 53). Point a test client at it with:
 
-    `./gatesentry-{platform} -service install`
+```bash
+dig @127.0.0.1 -p 10053 example.com
+```
 
-    Next, on linux you can use your system service runner to start or stop it, for example for ubuntu:
+Persistent data lives in `./data/` on the host (settings, logs, CA cert, device inventory). Back that directory up.
 
-    `service gatesentry start   #starts the service`
+Stop:
 
-    `service gatesentry stop    #stops the service`
+```bash
+docker compose down
+```
 
-    **For Windows**
+---
 
-    The installer (GatesentrySetup.exe) contains instructions.
+## Production: Linux host network
 
-    **Running as a Service**
+For a LAN DNS/proxy appliance you want **host networking**: real client IPs, mDNS, and DNS on port 53. Use the sample in [`docker-compose.host.yml`](docker-compose.host.yml).
 
-    The installer (GatesentrySetup.exe) should automatically install a service. You can look for it by searching for gatesentry in your Service manager (open it by running `services.msc`)
+1. Free port 53 if `systemd-resolved` owns it (see below).
+2. Edit the file: set `TZ`, and optionally `GS_ADMIN_PORT` / `GS_BASE_PATH`.
+3. **Do not** set `GATESENTRY_DNS_RESOLVER` unless you intend to overwrite the stored resolver on every start.
 
-3.  Launching the Server:
+```bash
+./build.sh
+docker compose -f docker-compose.host.yml up -d --build
+```
 
-    Execute the Gatesentry binary file to start the server.
-    Upon successful launch, the server will begin listening for incoming connections on port 10413.
+Then:
 
-## Important information
+| URL / check | |
+|-------------|-|
+| Admin UI | http://\<server-ip\>:8080/ |
+| DNS | `dig @<server-ip> -p 53 example.com` |
+| Proxy | `\<server-ip\>:10413` |
 
-### Ports
+Point the router’s DHCP **DNS server** at this host. Devices pick it up on the next lease renew (or after reconnecting Wi-Fi).
 
-By default Gatesentry uses the following ports
+### Freeing port 53 (`systemd-resolved`)
 
-| Port  | Purpose                                              |
-| ----- | ---------------------------------------------------- |
-| 10413 | For proxy (explicit mode)                            |
-| 10414 | For proxy (transparent mode, optional)               |
-| 80    | For the web based administration panel               |
-| 53    | For the built-in DNS server                          |
-| 80    | For the built-in webserver (showing DNS block pages) |
+```bash
+sudo mkdir -p /etc/systemd/resolved.conf.d
+echo -e '[Resolve]\nDNSStubListener=no' | sudo tee /etc/systemd/resolved.conf.d/gatesentry.conf
+sudo systemctl restart systemd-resolved
+```
 
-### Accessing the User Interface:
+Keep a recursive resolver on the LAN (router, Unbound, etc.) and set that as GateSentry’s upstream in **DNS settings** after login — not as `GATESENTRY_DNS_RESOLVER` in compose, unless you want the env var to win every boot.
 
-Open a modern web browser of your choice.
-Enter the following URL in the address bar: http://localhost
-The Gatesentry User Interface will load, providing access to various functionalities and settings.
+---
 
-### Default Login Credentials:
+## Run the binary without Docker
 
-    Username: admin
-    Password: admin
+Same build as above, then start from `bin/` (working directory matters; data is `bin/gatesentry/`):
 
-Use the above credentials to log in to the Gatesentry system for the first time. For security reasons, it is highly recommended to change the default password after the initial login.
+```bash
+./build.sh
+cd bin
+../run.sh
+```
 
-Note: Ensure your system's firewall and security settings allow traffic on ports 53 (DNS), 8080 (admin UI), and 10413 (proxy) to ensure seamless operation and access to the Gatesentry server and user interface.
+Or:
 
-This guide now specifically refers to the Gatesentry software and uses the `gatesentry-{platform}` filename convention for clarity.
+```bash
+cd bin
+GS_ADMIN_PORT=8080 GATESENTRY_DNS_PORT=10053 ./gatesentrybin
+```
 
-### DNS Information
+Optional Linux service (from the `bin/` directory):
 
-Gatesentry ships with a built in DNS server which can be used to block domains.
-The resolver used for forwarding requests can now be configured via the
-application settings ("dns_resolver"). It defaults to Google DNS
-(`8.8.8.8:53`).
+```bash
+./gatesentrybin -service install
+sudo service gatesentry start   # name depends on the OS service manager
+```
 
-## Transparent Proxy Mode (Linux only)
+`run.sh` / `restart.sh` default `GATESENTRY_DNS_RESOLVER` to `192.168.1.1:53` for this developer’s LAN. On your server, either unset it or point it at **your** recursive DNS. A non-empty value **overwrites** the stored `dns_resolver` setting on startup.
 
-GateSentry automatically enables transparent proxy mode on Linux systems. This allows traffic interception without client configuration using Linux's `SO_ORIGINAL_DST` socket option and `IP_TRANSPARENT` socket support for TPROXY.
+---
 
-### Setup for Local Traffic (REDIRECT mode)
+## Ports
 
-For traffic originating from the local machine:
+Code defaults vs the samples in this repo:
+
+| Service | Code default | Bridged sample (`docker-compose.yml`) | Host sample (`docker-compose.host.yml`) | Env |
+|---------|--------------|----------------------------------------|------------------------------------------|-----|
+| Admin UI | **80** | **8080** | **8080** | `GS_ADMIN_PORT` |
+| Admin URL prefix | `/gatesentry` | `/` (root) | `/` (root) | `GS_BASE_PATH` |
+| DNS | **53** | **10053** | **53** | `GATESENTRY_DNS_PORT` |
+| Explicit proxy | 10413 | 10413 | 10413 | (compiled default) |
+| Transparent proxy | 10414 | 10414 | 10414 | `GS_TRANSPARENT_PROXY_PORT` |
+| mDNS / Bonjour | 5353/udp | 5353/udp | host stack | — |
+
+With `GS_BASE_PATH=/` the UI is `http://host:port/`. With the code default `/gatesentry` it is `http://host:port/gatesentry/`. Metrics are on the **same** HTTP listener: `http://host:port/metrics` (or `…/gatesentry/metrics` if you keep the prefix).
+
+Open the firewall for DNS (53 or 10053), admin, and 10413.
+
+---
+
+## Environment variables
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `GS_ADMIN_PORT` | `80` | Admin HTTP port. Samples use `8080` so you do not need a privileged port. |
+| `GS_BASE_PATH` | `/gatesentry` | URL prefix. Set `/` for `http://host:port/`. |
+| `GATESENTRY_DNS_PORT` | `53` | DNS UDP+TCP port. |
+| `GATESENTRY_DNS_ADDR` | `0.0.0.0` | Bind address. Comma-separated for dual-stack, e.g. `0.0.0.0,::`. **Quote it in YAML** (`"GATESENTRY_DNS_ADDR=0.0.0.0,::"`) or `::` is parsed as a nested mapping. If you only bind IPv4, the server also starts an extra `::` listener. |
+| `GATESENTRY_DNS_RESOLVER` | unset | If **set**, overwrites stored `dns_resolver` on every start. Leave unset and configure the IPv4 upstream in the UI (default **`8.8.8.8:53`**). |
+| `GATESENTRY_DNS_RESOLVER_IPV6` | unset | Same overwrite behaviour for `dns_resolver_ipv6`. AAAA / HTTPS / ip6.arpa use this upstream. Set it in the UI to your recursive IPv6 DNS (for example `[2001:4860:4860::8888]:53`). |
+| `TZ` | `UTC` | IANA timezone for time-based rules (e.g. `Asia/Singapore`, `America/New_York`). |
+| `GS_MAX_SCAN_SIZE_MB` | `2` | Max response body scanned for keywords (MB). |
+| `GS_TRANSPARENT_PROXY` | `true` on Linux | Set `false` to disable the transparent listener. |
+| `GS_TRANSPARENT_PROXY_PORT` | `10414` | Transparent proxy port. |
+| `GS_DEBUG_LOGGING` | unset | `true` enables verbose proxy logs. |
+
+---
+
+## Sample Compose files
+
+- [`docker-compose.yml`](docker-compose.yml) — first run, bridged ports (8080 / 10053 / 10413).
+- [`docker-compose.host.yml`](docker-compose.host.yml) — Linux production, `network_mode: host`, DNS on 53.
+
+Both expect `./build.sh` to have produced `bin/gatesentrybin` before `docker compose up --build`.
+
+Copy either file to the server, change `TZ` and ports, and keep the `./data` (or a named volume) mount. The NAS-specific overlay used in this project’s lab is **not** what you should copy; these two files are the public samples.
+
+---
+
+## After it is running
+
+1. Log in, change `admin` / `admin`.
+2. **DNS → resolver** — IPv4 and IPv6 upstreams that actually exist on your network.
+3. Point DHCP DNS at GateSentry (production) or test with `dig @…`.
+4. Optional: create Domain Lists and rules (Allow/Block, per user). HTTPS URL/keyword/content-type matching needs MITM enabled on the rule (install the generated CA on clients).
+5. Optional: set the router’s HTTP proxy / WPAD to port 10413.
+
+---
+
+## Transparent proxy (Linux only)
+
+Enabled automatically on Linux (`SO_ORIGINAL_DST` / `IP_TRANSPARENT`). Disable with `GS_TRANSPARENT_PROXY=false`.
+
+Local REDIRECT:
 
 ```bash
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 10414
 iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10414
 ```
 
-### Setup for Forwarded Traffic (TPROXY mode)
-
-For traffic forwarded through the machine (e.g., Tailscale exit node, router):
+Forwarded TPROXY (router / Tailscale exit node):
 
 ```bash
-# Mark traffic for routing
 iptables -t mangle -A PREROUTING -p tcp --dport 80 -j TPROXY --tproxy-mark 0x1/0x1 --on-port 10414
 iptables -t mangle -A PREROUTING -p tcp --dport 443 -j TPROXY --tproxy-mark 0x1/0x1 --on-port 10414
-
-# Route marked traffic locally
 ip rule add fwmark 1 lookup 100
 ip route add local 0.0.0.0/0 dev lo table 100
 ```
 
-### Configuration
+Needs root or `CAP_NET_ADMIN`, and the GateSentry CA on clients for HTTPS inspection.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GS_TRANSPARENT_PROXY_PORT` | Port for transparent proxy | `10414` |
-| `GS_TRANSPARENT_PROXY` | Set to `false` to disable | `true` on Linux |
+---
 
-### Requirements
+## Local development (no Docker)
 
-- Linux with `SO_ORIGINAL_DST` and `IP_TRANSPARENT` support
-- Root or CAP_NET_ADMIN privileges
-- CA certificate installed on clients for HTTPS interception
+```bash
+cd ui && npm install && cd ..
+./build.sh
+./run.sh            # starts bin/gatesentrybin; logs → log.txt
+./restart.sh        # restart without rebuilding
+./run.sh --build    # rebuild then start
+```
 
-### Features
+Admin: http://localhost:8080/ (via `run.sh`’s `GS_ADMIN_PORT=8080`). Tests: `make tests`. Lint: `make lint`.
 
-- Supports both REDIRECT (local) and TPROXY (forwarded) traffic
-- Auto-starts on Linux with graceful fallback
-- Protocol auto-detection (HTTP vs HTTPS)
-- SSL Bump support for HTTPS filtering
-- All existing filters work in transparent mode
+---
 
-## Local Development
+## v2 in brief
 
-`./setup.sh`
+- **Rules, not global lists** — each rule matches users / domains / URL / content-type / keywords, then Allow or Block. First match wins (lower priority number wins).
+- **Domain Lists** — shared between DNS and proxy; URL-sourced lists (StevenBlack, Hagezi, …) plus local lists.
+- **Device discovery** — passive DNS, mDNS/Bonjour, RFC 2136 DDNS.
+- **WPAD / PAC**, dual-stack DNS, per-rule MITM.
 
-To run it:
-
-`./run.sh`
+More detail: [v2.0.0-beta.3 release](https://github.com/jbarwick/Gatesentry/releases/tag/v2.0.0-beta.3) and [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md) (router DHCP / reverse-proxy notes; some port numbers there still describe an older “admin on :80” layout — prefer this README and the compose files).

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## v2.0.0-beta.3 (2 September 2026)
+
+- Public install docs: README now matches how v2 is actually built and run
+- Sample `docker-compose.yml` (bridged 8080/10053) and `docker-compose.host.yml` (Linux host network, DNS 53)
+- Dockerfile/compose notes: quote `GATESENTRY_DNS_ADDR=0.0.0.0,::`; do not set `GATESENTRY_DNS_RESOLVER` unless you want it to overwrite stored settings
+
 ## v2.0.0-beta.2 (2 September 2026)
 
 - Dual-stack DNS listen (`0.0.0.0` plus `::`); AAAA answers for appliance/WPAD/blocked names

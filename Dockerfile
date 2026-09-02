@@ -22,10 +22,12 @@ COPY bin/gatesentrybin ./gatesentry-bin
 # Pre-create the data directory (volume mount point for persistent state)
 RUN mkdir -p /usr/local/gatesentry/gatesentry
 
-# Ports:
-#   10053  - DNS server (UDP + TCP)
-#   8080   - Web admin UI
-#   10413  - HTTP(S) filtering proxy
+# Documented ports (actual binds come from env; host-network often uses 53/80):
+#   10053  - DNS (bridged sample)
+#   8080   - Admin UI (GS_ADMIN_PORT)
+#   10413  - HTTP(S) proxy
+#   10414  - Transparent proxy
+#   5353   - mDNS
 EXPOSE 10053/udp 10053/tcp 8080/tcp 10413/tcp 10414/tcp 5353/udp
 
 ENTRYPOINT ["./gatesentry-bin"]

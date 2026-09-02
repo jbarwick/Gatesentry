@@ -1,0 +1,44 @@
+# GateSentry — Linux production sample (host network)
+#
+# Use this on a dedicated Linux box / NAS that should be the LAN DNS server.
+# Host networking is required for real client IPs, mDNS, and a clean port 53.
+#
+# Prerequisite:
+#   cd ui && npm install && cd ..
+#   ./build.sh
+#   # Free port 53 if systemd-resolved owns it (see README)
+#   docker compose -f docker-compose.host.yml up -d --build
+#
+# Admin UI:  http://<host-ip>:8080/
+# DNS:       dig @<host-ip> -p 53 example.com
+# Proxy:     <host-ip>:10413
+#
+# Do not combine network_mode: host with a `ports:` section.
+
+services:
+  gatesentry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gatesentry:2.0.0-beta.3
+    container_name: gatesentry
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/usr/local/gatesentry/gatesentry
+    environment:
+      - TZ=${TZ:-UTC}
+      - GS_ADMIN_PORT=8080
+      - GS_BASE_PATH=/
+      - GATESENTRY_DNS_PORT=53
+      # Quote this value. Bare :: is invalid YAML (nested mapping).
+      - "GATESENTRY_DNS_ADDR=0.0.0.0,::"
+      - GS_MAX_SCAN_SIZE_MB=2
+      # Leave these unset unless you want them to overwrite stored settings
+      # on every container start:
+      # - GATESENTRY_DNS_RESOLVER=8.8.8.8:53
+      # - GATESENTRY_DNS_RESOLVER_IPV6=[2001:4860:4860::8888]:53
+      # Behind a reverse proxy at /gatesentry/:
+      # - GS_BASE_PATH=/gatesentry
+      # Bind admin on 80 instead of 8080 (nothing else may use :80):
+      # - GS_ADMIN_PORT=80
