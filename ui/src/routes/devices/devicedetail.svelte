@@ -8,11 +8,6 @@
     FormGroup,
     Tag,
     Button,
-    StructuredList,
-    StructuredListHead,
-    StructuredListRow,
-    StructuredListCell,
-    StructuredListBody,
   } from "carbon-components-svelte";
   import { createEventDispatcher } from "svelte";
   import { getBasePath } from "../../lib/navigate";
@@ -25,18 +20,18 @@
   export let open = false;
   export let pingAvailable: boolean | null = null;
 
-  let manualName = device?.manual_name || "";
-  let owner = device?.owner || "";
-  let category = device?.category || "";
+  let manualName = "";
+  let owner = "";
+  let category = "";
   let saving = false;
   let pinging = false;
   let error = "";
+  let detailTab = "reach";
+  let formDeviceId = "";
 
   function getToken(): string {
     return localStorage.getItem("jwt") || "";
   }
-
-  let formDeviceId = "";
 
   function syncForm(d: any) {
     if (!d) return;
@@ -47,7 +42,39 @@
 
   $: if (device?.id && device.id !== formDeviceId) {
     formDeviceId = device.id;
+    detailTab = "reach";
     syncForm(device);
+  }
+
+  $: pingStatus =
+    device?.ping_status || (device?.online ? "online" : "unknown");
+  $: pingLabel =
+    pingStatus === "online"
+      ? "Online"
+      : pingStatus === "offline"
+        ? "Offline"
+        : "Unknown";
+  $: noIp = !device?.ipv4 && !device?.ipv6;
+  $: pingOfflineButDns =
+    pingStatus !== "online" &&
+    !!device?.last_dns_query &&
+    !String(device.last_dns_query).startsWith("0001-");
+
+  function dnsActivityLabel(): string {
+    const iso = device?.last_dns_query;
+    if (!iso || iso.startsWith("0001-")) return "Never observed";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "Never observed";
+    if (Date.now() - date.getTime() < DNS_RECENT_MS) return "Active";
+    return "Quiet";
+  }
+
+  function sourceTagType(s: string): string {
+    if (s === "ddns") return "green";
+    if (s === "mdns") return "blue";
+    if (s === "passive") return "warm-gray";
+    if (s === "manual") return "purple";
+    return "gray";
   }
 
   async function save() {
@@ -68,8 +95,7 @@
         }),
       });
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText);
+        throw new Error(await response.text());
       }
       dispatch("saved");
     } catch (err) {
@@ -89,11 +115,11 @@
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText);
+        throw new Error(await response.text());
       }
       const data = await response.json();
       if (data.device) {
+        device = { ...device, ...data.device };
         dispatch("probed", data.device);
       }
     } catch (err) {
@@ -125,43 +151,15 @@
     if (diffMin < 60) return `${diffMin}m ago`;
     const diffHr = Math.floor(diffMin / 60);
     if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.floor(diffHr / 24);
-    return `${diffDay}d ago`;
+    return `${Math.floor(diffHr / 24)}d ago`;
   }
 
-  function pingStatus(): string {
-    return device?.ping_status || (device?.online ? "online" : "unknown");
+  function when(iso: string): { abs: string; rel: string } {
+    return { abs: formatDate(iso), rel: formatTimeAgo(iso) };
   }
-
-  function pingLabel(): string {
-    const s = pingStatus();
-    if (s === "online") return "Online";
-    if (s === "offline") return "Offline";
-    return "Unknown";
-  }
-
-  function hasRecentDns(): boolean {
-    const iso = device?.last_dns_query;
-    if (!iso || iso.startsWith("0001-")) return false;
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return false;
-    return Date.now() - date.getTime() < DNS_RECENT_MS;
-  }
-
-  function dnsActivityLabel(): string {
-    const iso = device?.last_dns_query;
-    if (!iso || iso.startsWith("0001-")) return "Never observed";
-    if (hasRecentDns()) return "Active";
-    return "Quiet";
-  }
-
-  $: pingOfflineButDns =
-    pingStatus() !== "online" && !!device?.last_dns_query &&
-    !String(device?.last_dns_query).startsWith("0001-");
-  $: noIp = !device?.ipv4 && !device?.ipv6;
 </script>
 
-<ComposedModal {open} on:close={close} size="lg">
+<ComposedModal {open} on:close={close} size="md">
   <ModalHeader
     title="Device Details"
     label={device?.display_name || "Unknown Device"}
@@ -172,98 +170,112 @@
     {/if}
 
     <FormGroup legendText="Assign a Name">
-      <TextInput
-        labelText="Display Name"
-        placeholder="e.g., Vivienne's iPad"
-        bind:value={manualName}
-      />
-      <TextInput
-        labelText="Owner"
-        placeholder="e.g., Vivienne, Dad"
-        bind:value={owner}
-        style="margin-top: 0.5rem;"
-      />
-      <TextInput
-        labelText="Category"
-        placeholder="e.g., kids, adults, iot"
-        bind:value={category}
-        style="margin-top: 0.5rem;"
-      />
+      <div class="name-grid">
+        <TextInput
+          labelText="Display Name"
+          placeholder="e.g., Vivienne's iPad"
+          bind:value={manualName}
+          size="sm"
+        />
+        <TextInput
+          labelText="Owner"
+          placeholder="e.g., Vivienne, Dad"
+          bind:value={owner}
+          size="sm"
+        />
+        <TextInput
+          labelText="Category"
+          placeholder="e.g., kids, adults, iot"
+          bind:value={category}
+          size="sm"
+        />
+      </div>
     </FormGroup>
 
-    <div class="detail-heading">
-      <h5>Reachability</h5>
-      <Button
-        kind="tertiary"
-        size="small"
-        disabled={pinging || noIp}
-        on:click={pingNow}
+    <div class="gs-tabs dd-tabs">
+      <button
+        type="button"
+        class="gs-tab"
+        class:gs-tab--active={detailTab === "reach"}
+        on:click={() => (detailTab = "reach")}>Reachability</button
       >
-        {pinging ? "Pinging…" : "Ping now"}
-      </Button>
+      <button
+        type="button"
+        class="gs-tab"
+        class:gs-tab--active={detailTab === "dns"}
+        on:click={() => (detailTab = "dns")}>DNS queries</button
+      >
+      <button
+        type="button"
+        class="gs-tab"
+        class:gs-tab--active={detailTab === "id"}
+        on:click={() => (detailTab = "id")}>Identity</button
+      >
+      <button
+        type="button"
+        class="gs-tab"
+        class:gs-tab--active={detailTab === "disc"}
+        on:click={() => (detailTab = "disc")}>Discovery</button
+      >
     </div>
-    <StructuredList condensed flush>
-      <StructuredListHead>
-        <StructuredListRow head>
-          <StructuredListCell head>Property</StructuredListCell>
-          <StructuredListCell head>Value</StructuredListCell>
-        </StructuredListRow>
-      </StructuredListHead>
-      <StructuredListBody>
-        <StructuredListRow>
-          <StructuredListCell>Ping</StructuredListCell>
-          <StructuredListCell>
-            <span class="status-dot {pingStatus()}"></span>
-            {pingLabel()}
-            {#if pingStatus() === "online" && device?.ping_rtt_ms}
-              <span class="muted">({device.ping_rtt_ms} ms)</span>
+
+    {#if detailTab === "reach"}
+      <div class="tab-toolbar">
+        <Button
+          kind="tertiary"
+          size="small"
+          disabled={pinging || noIp}
+          on:click={pingNow}
+        >
+          {pinging ? "Pinging…" : "Ping now"}
+        </Button>
+      </div>
+      <div class="dd-list">
+        <div class="dd-row">
+          <div class="dd-label">Online / offline</div>
+          <div class="dd-value">
+            <span class="status-dot {pingStatus}"></span>
+            {pingLabel}
+            {#if pingStatus === "online" && device?.ping_rtt_ms}
+              <span class="muted">{device.ping_rtt_ms} ms</span>
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>Last ping</StructuredListCell>
-          <StructuredListCell>
-            {formatDate(device?.last_ping)}
-            {#if formatTimeAgo(device?.last_ping)}
-              <span class="muted">({formatTimeAgo(device?.last_ping)})</span>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">Last ping</div>
+          <div class="dd-value">
+            {when(device?.last_ping).abs}
+            {#if when(device?.last_ping).rel}
+              <span class="muted">{when(device?.last_ping).rel}</span>
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>Address probed</StructuredListCell>
-          <StructuredListCell
-            >{device?.ipv4 || device?.ipv6 || "—"}</StructuredListCell
-          >
-        </StructuredListRow>
-      </StructuredListBody>
-    </StructuredList>
-    {#if noIp}
-      <p class="hint">No IP address is known for this device, so it cannot be pinged.</p>
-    {:else if pingAvailable === false}
-      <p class="hint">
-        Ping is not available in this environment. Status stays unknown.
-      </p>
-    {:else if pingOfflineButDns}
-      <p class="hint">
-        This device did not respond to ping but has queried DNS — many phones and
-        IoT devices ignore ICMP.
-      </p>
-    {:else if pingStatus() === "offline"}
-      <p class="hint">Ping failed. The device may be off, on another network, or blocking ICMP.</p>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">Address probed</div>
+          <div class="dd-value mono">{device?.ipv4 || device?.ipv6 || "—"}</div>
+        </div>
+      </div>
+      {#if noIp}
+        <p class="hint">No IP address is known, so this device cannot be pinged.</p>
+      {:else if pingAvailable === false}
+        <p class="hint">Ping is not available in this environment. Status stays unknown.</p>
+      {:else if pingOfflineButDns}
+        <p class="hint">
+          Ping failed, but this device has queried DNS — many phones and IoT
+          devices ignore ICMP.
+        </p>
+      {:else if pingStatus === "offline"}
+        <p class="hint">
+          Ping failed. The device may be off, on another network, or blocking ICMP.
+        </p>
+      {/if}
     {/if}
 
-    <h5 class="section-title">DNS queries sent</h5>
-    <StructuredList condensed flush>
-      <StructuredListHead>
-        <StructuredListRow head>
-          <StructuredListCell head>Property</StructuredListCell>
-          <StructuredListCell head>Value</StructuredListCell>
-        </StructuredListRow>
-      </StructuredListHead>
-      <StructuredListBody>
-        <StructuredListRow>
-          <StructuredListCell>Status</StructuredListCell>
-          <StructuredListCell>
+    {#if detailTab === "dns"}
+      <div class="dd-list">
+        <div class="dd-row">
+          <div class="dd-label">Status</div>
+          <div class="dd-value">
             <Tag
               size="sm"
               type={dnsActivityLabel() === "Active"
@@ -272,41 +284,33 @@
                   ? "gray"
                   : "outline"}>{dnsActivityLabel()}</Tag
             >
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>Last DNS query</StructuredListCell>
-          <StructuredListCell>
-            {formatDate(device?.last_dns_query)}
-            {#if formatTimeAgo(device?.last_dns_query)}
-              <span class="muted">({formatTimeAgo(device?.last_dns_query)})</span>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">Last DNS query</div>
+          <div class="dd-value">
+            {when(device?.last_dns_query).abs}
+            {#if when(device?.last_dns_query).rel}
+              <span class="muted">{when(device?.last_dns_query).rel}</span>
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-      </StructuredListBody>
-    </StructuredList>
-    <p class="hint">
-      This is when the device last asked GateSentry to resolve a name. Having an
-      IP or a local DNS record does not count as a query. A quiet device can
-      still be online.
-    </p>
+          </div>
+        </div>
+      </div>
+      <p class="hint">
+        Last time this device asked GateSentry to resolve a name. An IP or local
+        DNS record is not a query. A quiet device can still be online.
+      </p>
+    {/if}
 
-    <h5 class="section-title">Identity</h5>
-    <StructuredList condensed flush>
-      <StructuredListHead>
-        <StructuredListRow head>
-          <StructuredListCell head>Property</StructuredListCell>
-          <StructuredListCell head>Value</StructuredListCell>
-        </StructuredListRow>
-      </StructuredListHead>
-      <StructuredListBody>
-        <StructuredListRow>
-          <StructuredListCell>DNS Name</StructuredListCell>
-          <StructuredListCell>{device?.dns_name || "—"}</StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>Hostnames</StructuredListCell>
-          <StructuredListCell>
+    {#if detailTab === "id"}
+      <div class="dd-list">
+        <div class="dd-row">
+          <div class="dd-label">DNS name</div>
+          <div class="dd-value">{device?.dns_name || "—"}</div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">Hostnames</div>
+          <div class="dd-value tags">
             {#if device?.hostnames?.length}
               {#each device.hostnames as h}
                 <Tag size="sm" type="outline">{h}</Tag>
@@ -314,11 +318,11 @@
             {:else}
               —
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>mDNS Names</StructuredListCell>
-          <StructuredListCell>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">mDNS names</div>
+          <div class="dd-value tags">
             {#if device?.mdns_names?.length}
               {#each device.mdns_names as m}
                 <Tag size="sm" type="blue">{m}</Tag>
@@ -326,21 +330,19 @@
             {:else}
               —
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>IPv4</StructuredListCell>
-          <StructuredListCell>{device?.ipv4 || "—"}</StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>IPv6</StructuredListCell>
-          <StructuredListCell>
-            <span class="ipv6-value">{device?.ipv6 || "—"}</span>
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>MAC Address(es)</StructuredListCell>
-          <StructuredListCell>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">IPv4</div>
+          <div class="dd-value mono">{device?.ipv4 || "—"}</div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">IPv6</div>
+          <div class="dd-value mono wrap">{device?.ipv6 || "—"}</div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">MAC address</div>
+          <div class="dd-value tags">
             {#if device?.macs?.length}
               {#each device.macs as mac}
                 <Tag size="sm" type="warm-gray">{mac}</Tag>
@@ -348,40 +350,24 @@
             {:else}
               —
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-      </StructuredListBody>
-    </StructuredList>
+          </div>
+        </div>
+      </div>
+    {/if}
 
-    <h5 class="section-title">Discovery</h5>
-    <StructuredList condensed flush>
-      <StructuredListHead>
-        <StructuredListRow head>
-          <StructuredListCell head>Property</StructuredListCell>
-          <StructuredListCell head>Value</StructuredListCell>
-        </StructuredListRow>
-      </StructuredListHead>
-      <StructuredListBody>
-        <StructuredListRow>
-          <StructuredListCell>Primary Source</StructuredListCell>
-          <StructuredListCell>
-            <Tag
-              size="sm"
-              type={device?.source === "ddns"
-                ? "green"
-                : device?.source === "mdns"
-                ? "blue"
-                : device?.source === "passive"
-                ? "warm-gray"
-                : device?.source === "manual"
-                ? "purple"
-                : "gray"}>{device?.source || "—"}</Tag
+    {#if detailTab === "disc"}
+      <div class="dd-list">
+        <div class="dd-row">
+          <div class="dd-label">Primary source</div>
+          <div class="dd-value">
+            <Tag size="sm" type={sourceTagType(device?.source)}
+              >{device?.source || "—"}</Tag
             >
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>All Sources</StructuredListCell>
-          <StructuredListCell>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">All sources</div>
+          <div class="dd-value tags">
             {#if device?.sources?.length}
               {#each device.sources as s}
                 <Tag size="sm" type="outline">{s}</Tag>
@@ -389,31 +375,27 @@
             {:else}
               —
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>First Seen</StructuredListCell>
-          <StructuredListCell
-            >{formatDate(device?.first_seen)}</StructuredListCell
-          >
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>Last Seen</StructuredListCell>
-          <StructuredListCell>
-            {formatDate(device?.last_seen)}
-            {#if formatTimeAgo(device?.last_seen)}
-              <span class="muted">({formatTimeAgo(device?.last_seen)})</span>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">First seen</div>
+          <div class="dd-value">{when(device?.first_seen).abs}</div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">Last seen</div>
+          <div class="dd-value">
+            {when(device?.last_seen).abs}
+            {#if when(device?.last_seen).rel}
+              <span class="muted">{when(device?.last_seen).rel}</span>
             {/if}
-          </StructuredListCell>
-        </StructuredListRow>
-        <StructuredListRow>
-          <StructuredListCell>Device ID</StructuredListCell>
-          <StructuredListCell>
-            <code style="font-size: 0.75rem;">{device?.id || "—"}</code>
-          </StructuredListCell>
-        </StructuredListRow>
-      </StructuredListBody>
-    </StructuredList>
+          </div>
+        </div>
+        <div class="dd-row">
+          <div class="dd-label">Device ID</div>
+          <div class="dd-value mono wrap">{device?.id || "—"}</div>
+        </div>
+      </div>
+    {/if}
   </ModalBody>
   <ModalFooter
     primaryButtonText={saving ? "Saving..." : "Save"}
@@ -425,13 +407,66 @@
 </ComposedModal>
 
 <style>
+  .name-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  .dd-tabs {
+    margin: 0.5rem 0 0.75rem 0;
+  }
+  .tab-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.5rem;
+  }
+  .dd-list {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid #e0e0e0;
+  }
+  .dd-row {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr;
+    gap: 0.75rem;
+    align-items: start;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid #e0e0e0;
+    min-height: 1.75rem;
+  }
+  .dd-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #525252;
+    letter-spacing: 0.01em;
+    line-height: 1.4;
+    padding-top: 0.1rem;
+  }
+  .dd-value {
+    font-size: 0.8125rem;
+    color: #161616;
+    line-height: 1.4;
+    min-width: 0;
+  }
+  .dd-value.mono {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+  }
+  .dd-value.wrap {
+    word-break: break-all;
+  }
+  .dd-value.tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
   .status-dot {
     display: inline-block;
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     vertical-align: middle;
-    margin-right: 0.25rem;
+    margin-right: 0.35rem;
     box-sizing: border-box;
   }
   .status-dot.online {
@@ -446,36 +481,24 @@
   }
   .error-message {
     color: #da1e28;
-    margin-bottom: 1rem;
-    font-size: 0.875rem;
-  }
-  .ipv6-value {
-    word-break: break-all;
+    margin-bottom: 0.75rem;
     font-size: 0.8125rem;
-  }
-  .section-title {
-    margin-top: 1.5rem;
-    margin-bottom: 0.5rem;
-  }
-  .detail-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 1.5rem;
-    margin-bottom: 0.5rem;
-  }
-  .detail-heading h5 {
-    margin: 0;
   }
   .muted {
     color: #6f6f6f;
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     margin-left: 0.35rem;
   }
   .hint {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     color: #525252;
-    margin: 0.5rem 0 0 0;
+    margin: 0.6rem 0 0 0;
+    line-height: 1.4;
+  }
+
+  @media (min-width: 672px) {
+    .name-grid {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
   }
 </style>

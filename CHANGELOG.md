@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v2.0.0-beta.11 (9 September 2026)
+
+- Device details dialog: Reachability, DNS queries, Identity, and Discovery on tabs
+- Compact field layout; Ping now updates online/offline in the open dialog
+
 ## v2.0.0-beta.10 (9 September 2026)
 
 - Stats "Past 7 days" scans the full window (not the newest 20k log lines)

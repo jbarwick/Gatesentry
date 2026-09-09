@@ -20,7 +20,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gatesentry:2.0.0-beta.10
+    image: gatesentry:2.0.0-beta.11
     container_name: gatesentry
     restart: unless-stopped
     network_mode: host

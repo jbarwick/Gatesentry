@@ -215,7 +215,7 @@
   }
 
   async function handleDeviceProbed(event: CustomEvent<Device>) {
-    const updated = formatDevice(event.detail);
+    const updated = formatDevice({ ...selectedDevice, ...event.detail });
     devices = devices.map((d) => (d.id === updated.id ? updated : d));
     selectedDevice = updated;
   }
