@@ -220,7 +220,7 @@
     selectedDevice = updated;
   }
 
-  $: filtered = search
+  $: filtered = (search
     ? devices.filter((d) => {
         const q = search.toLowerCase();
         return (
@@ -235,7 +235,14 @@
           (d.mdns_names || []).some((h) => h.toLowerCase().includes(q))
         );
       })
-    : devices;
+    : devices
+  )
+    .slice()
+    .sort((a, b) =>
+      (a.display_name || "").localeCompare(b.display_name || "", undefined, {
+        sensitivity: "base",
+      }),
+    );
 
   $: onlineCount = devices.filter((d) => d.ping_status === "online").length;
   $: dnsRecentCount = devices.filter((d) => isDnsRecent(d.last_dns_query)).length;

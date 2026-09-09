@@ -118,7 +118,7 @@ func (ds *DeviceStore) saveToDisk() error {
 	for _, d := range ds.devices {
 		// Only persist devices that have a DNS name or are marked persistent.
 		// Ephemeral passive entries (IP-only, no hostname) are rediscovered quickly.
-		if d.DNSName == "" && !d.Persistent {
+		if d.DNSName == "" && !d.Persistent && len(d.MACs) == 0 {
 			continue
 		}
 		devices = append(devices, persistedDevice{

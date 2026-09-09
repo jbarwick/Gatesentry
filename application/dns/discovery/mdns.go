@@ -282,6 +282,11 @@ func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
 		return
 	}
 
+	// Do not ingest this process's own Bonjour ads as LAN devices.
+	if isOwnAdvertisement(instanceName, hostname, ipv4, ipv6) {
+		return
+	}
+
 	var ipOwner, nameOwner *Device
 	if ipv4 != "" {
 		ipOwner = b.store.FindDeviceByIP(ipv4)

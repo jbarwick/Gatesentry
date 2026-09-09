@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -283,6 +284,14 @@ func (ds *DeviceStore) GetAllDevices() []Device {
 	for _, d := range ds.devices {
 		result = append(result, *d)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		a := strings.ToLower(result[i].GetDisplayName())
+		b := strings.ToLower(result[j].GetDisplayName())
+		if a != b {
+			return a < b
+		}
+		return result[i].IPv4 < result[j].IPv4
+	})
 	return result
 }
 
@@ -674,6 +683,7 @@ func (ds *DeviceStore) evictConflictingIP(keepID string, ipv4, ipv6 string) {
 }
 
 func (ds *DeviceStore) rebuildIndexes() {
+	ds.stripForeignSelfAdvertisements()
 	ds.reclaimStolenNames()
 	ds.expireStaleNames(time.Now())
 

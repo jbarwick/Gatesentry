@@ -54,7 +54,7 @@ func TestIsLinkLocalIPv6(t *testing.T) {
 		{"fd00::1", false},      // ULA — not link-local
 		{"2001:db8::1", false},  // Documentation range
 		{"::1", false},          // Loopback
-		{"192.0.2.1", false},  // IPv4
+		{"192.0.2.1", false},    // IPv4
 		{"", false},             // Empty
 		{"invalid", false},      // Garbage
 		{"fe80::", true},        // Minimal link-local
@@ -233,6 +233,60 @@ func TestProcessEntry_MultipleServiceTypes(t *testing.T) {
 	}
 	if device.DNSName != "apple-tv" {
 		t.Errorf("Expected DNSName 'apple-tv', got %q", device.DNSName)
+	}
+}
+
+func TestProcessEntry_SkipsOwnBonjourInstance(t *testing.T) {
+	store := NewDeviceStore("local")
+	browser := NewMDNSBrowser(store, time.Minute)
+	store.ObservePassiveQuery("192.0.2.50")
+
+	entry := bonjour.NewServiceEntry("GateSentry", "_http._tcp", "local")
+	entry.HostName = "appliance.local."
+	entry.AddrIPv4 = net.ParseIP("192.0.2.50")
+	browser.processEntry(entry)
+
+	d := store.FindDeviceByIP("192.0.2.50")
+	if d == nil {
+		t.Fatal("passive device should remain")
+	}
+	if d.HasHostnameKey("appliance") || len(d.MDNSNames) > 0 {
+		t.Errorf("own Bonjour ad applied to another address: hostnames=%v mdns=%v", d.Hostnames, d.MDNSNames)
+	}
+}
+
+func TestStripForeignSelfAdvertisements(t *testing.T) {
+	store := NewDeviceStore("local")
+	id := store.UpsertDevice(&Device{
+		Hostnames: []string{"appliance.local", "pc"},
+		MDNSNames: []string{"GateSentry"},
+		IPv4:      "192.0.2.50",
+		Source:    SourceMDNS,
+	})
+	// 192.0.2.50 is not a local interface; GateSentry mdns should be stripped.
+	got := store.GetDevice(id)
+	for _, m := range got.MDNSNames {
+		if isOwnMDNSInstance(m) {
+			t.Errorf("own instance still on foreign device: %v", got.MDNSNames)
+		}
+	}
+}
+
+func TestGetAllDevicesSortedByName(t *testing.T) {
+	store := NewDeviceStore("local")
+	store.UpsertDevice(&Device{Hostnames: []string{"zeta"}, IPv4: "192.0.2.3", Source: SourceManual})
+	store.UpsertDevice(&Device{Hostnames: []string{"Alpha"}, IPv4: "192.0.2.1", Source: SourceManual})
+	store.UpsertDevice(&Device{Hostnames: []string{"mike"}, IPv4: "192.0.2.2", Source: SourceManual})
+	all := store.GetAllDevices()
+	if len(all) != 3 {
+		t.Fatalf("len=%d", len(all))
+	}
+	got := []string{all[0].GetDisplayName(), all[1].GetDisplayName(), all[2].GetDisplayName()}
+	want := []string{"Alpha", "mike", "zeta"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order %v, want %v", got, want)
+		}
 	}
 }
 

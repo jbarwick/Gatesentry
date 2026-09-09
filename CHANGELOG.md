@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## v2.0.0-beta.7 (9 September 2026)
+
+- Ignore this process's own Bonjour advertisements so they are not applied as another device's name
+- Strip those ads from persisted devices whose address is not local
+- Devices API/list sorted by display name
+
 ## v2.0.0-beta.6 (9 September 2026)
 
 - Hostname ownership prefers a bare DNS label over the same name with `.local`, so a stolen alias is not treated as the owner
