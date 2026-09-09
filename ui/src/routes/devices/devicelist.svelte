@@ -230,7 +230,9 @@
           d.ipv6?.includes(q) ||
           d.macs_display?.toLowerCase().includes(q) ||
           d.source?.toLowerCase().includes(q) ||
-          d.owner?.toLowerCase().includes(q)
+          d.owner?.toLowerCase().includes(q) ||
+          (d.hostnames || []).some((h) => h.toLowerCase().includes(q)) ||
+          (d.mdns_names || []).some((h) => h.toLowerCase().includes(q))
         );
       })
     : devices;

@@ -657,7 +657,7 @@
           title={$_("IPv4 DNS Resolver")}
           labelText={$_("IPv4 DNS Resolver")}
           type="text"
-          helperText="host:port — e.g. 192.168.1.1:53"
+          helperText="host:port — e.g. 8.8.8.8:53"
         />
       </div>
       <div style="margin-top: 12px; max-width: 400px;">
@@ -666,7 +666,7 @@
           title={$_("IPv6 DNS Resolver")}
           labelText={$_("IPv6 DNS Resolver")}
           type="text"
-          helperText="[addr]:port — e.g. [fd00:1234:5678::1]:53"
+          helperText="[addr]:port — e.g. [2001:db8::1]:53"
         />
       </div>
     </div>

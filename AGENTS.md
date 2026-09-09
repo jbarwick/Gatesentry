@@ -7,7 +7,7 @@ Important context for AI agents working on this project.
 - **Active development is `v2`** (this checkout tracks `myfork/v2`). Do not treat origin/master or v1.20.x / "1.2" as the working tree.
 - Upstream: `origin` = https://github.com/fifthsegment/Gatesentry.git
 - Fork: `myfork` = https://github.com/jbarwick/Gatesentry.git
-- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.4`). That string is the only release tag. Do not invent a different version for the image.
+- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.5`). That string is the only release tag. Do not invent a different version for the image.
 
 ## Which tree to use for deployments
 
@@ -65,6 +65,15 @@ Do not print these values. Image: `monster-jj.jvj28.com:9092/gatesentry:<GATESEN
 - **Svelte frontend** — In `ui/` directory (Svelte 4, Vite 4, Carbon Components Svelte)
 - **Embedded UI** — The built UI is copied into `application/webserver/frontend/files/` and embedded in the Go binary
 - **`gatesentryproxy` is Go 1.17** — range-loop variable pointers (`&item` in `for _, item := range`) are still a bug there
+
+## Addresses are values, not identity
+
+A device's IPv4/IPv6 is **whatever it has right now**. It can change on DHCP renew. Inspect it at runtime (device store, ARP, a DNS answer). Do not bake any site unicast address, LAN prefix, or box hostname into application code, product defaults, or UI copy.
+
+- Identity is hostname / MAC / user-assigned name. IP is a field on the record.
+- Do not merge two named devices because an mDNS packet put name A at address B.
+- Tests and comments use documentation ranges only: **192.0.2.0/24** (RFC 5737) and **2001:db8::/32** (RFC 3849). Never copy the operator's LAN into fixtures.
+- Product resolver default is `8.8.8.8:53` (IPv6 resolver default empty). Site DNS is settings or `GATESENTRY_DNS_RESOLVER` at deploy time.
 
 ## Build & Run (local/dev)
 
@@ -132,7 +141,7 @@ curl http://localhost:8080/api/about
 
 Without `--noproxy '*'`, requests hit the GateSentry proxy on port 10413 instead of the admin UI, producing misleading errors (400, 508, etc.).
 
-Admin URL on the LAN: **`http://monster-jj:9876/gatesentry/`** (or `http://192.168.1.91:9876/gatesentry/`). Avoid `monster-jj.jvj28.com` (HTTPS redirect on 80/443). When DNS or the proxy is unhealthy, use the IP and `--noproxy '*'`.
+Admin URL on the LAN: **`http://monster-jj:9876/gatesentry/`**. Avoid the HTTPS vhost on :80/:443. When DNS or the proxy is unhealthy, use the NAS IPv4 and `--noproxy '*'`.
 
 ## Authentication
 
@@ -226,7 +235,7 @@ The rule form (`ui/src/routes/rules/rform.svelte`) matches this pipeline:
 
 ## Availability — Admin must work when upstream DNS is down
 
-This is a product requirement, not an ops inconvenience. The last outage was: router DNS (`192.168.1.1:53`) down → operator tried to open admin to change `dns_resolver` → admin unresponsive → process later SIGTERM'd.
+This is a product requirement, not an ops inconvenience. The last outage was: site recursive DNS down → operator tried to open admin to change `dns_resolver` → admin unresponsive → process later SIGTERM'd.
 
 Constraints the code must satisfy:
 
@@ -308,4 +317,4 @@ We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_R
 - **DNS page UI load/save of assigned list IDs** (`dnslists.svelte` / `dns.svelte`) was still being debugged. DNS filtering itself works.
 - **Production hang when upstream DNS is down** — see Availability section. Highest priority before bringing monster-jj back.
 - **`log.db` growth** (134MB) — stats default to a 7-day full scan (`handler_stats.go`).
-- Production image on monster-jj is `2.0.0-beta.4`. Next ship: bump `GATESENTRY_VERSION` in `main.go`, then `./build.sh && ./release.sh && ./deploy.sh`.
+- Production image on monster-jj is `2.0.0-beta.5`. Next ship: bump `GATESENTRY_VERSION` in `main.go`, then `./build.sh && ./release.sh && ./deploy.sh`.

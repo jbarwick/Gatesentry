@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"net"
+	"strings"
 	"time"
 
 	"github.com/miekg/dns"
@@ -42,12 +43,18 @@ type Device struct {
 
 	// --- Identity: how we recognize this device across IP changes ---
 
-	// Hostnames observed via DHCP Option 12.
-	// Most recent first. The first entry is the "primary" hostname.
+	// Hostnames observed via DHCP Option 12 / DDNS / mDNS.
+	// First entry is the primary hostname. Extra aliases expire (NameTTL).
 	Hostnames []string `json:"hostnames,omitempty"`
 
 	// MDNSNames observed via Bonjour/mDNS service discovery.
+	// These are aliases and expire (NameTTL) unless re-observed.
 	MDNSNames []string `json:"mdns_names,omitempty"`
+
+	// HostnameSeen / MDNSNameSeen is last observation time per normalized name.
+	// Missing stamps on extra names are treated as already expired.
+	HostnameSeen map[string]time.Time `json:"hostname_seen,omitempty"`
+	MDNSNameSeen map[string]time.Time `json:"mdns_name_seen,omitempty"`
 
 	// MACs observed for this device. May change with MAC randomization.
 	// Stored as lowercase colon-separated (e.g., "aa:bb:cc:dd:ee:ff").
@@ -119,12 +126,11 @@ type Device struct {
 
 // GetDisplayName returns the best available name for this device.
 // Priority: ManualName > first Hostname > first MDNSName > "Unknown (<MAC>)" > "Unknown (<IPv4>)"
+// DisplayName is a derived cache and is not used as a source (it used to
+// freeze a stolen mDNS name as the title).
 func (d *Device) GetDisplayName() string {
 	if d.ManualName != "" {
 		return d.ManualName
-	}
-	if d.DisplayName != "" {
-		return d.DisplayName
 	}
 	if len(d.Hostnames) > 0 {
 		return d.Hostnames[0]
@@ -250,6 +256,11 @@ const ManualTTL uint32 = 300
 // to treat DNS activity as "recent" in the UI.
 const OnlineThreshold = 5 * time.Minute
 
+// NameTTL is how long an extra hostname or mDNS alias is kept without
+// being seen again. Primary hostname (Hostnames[0]) does not expire.
+// Unstamped extras in old persist files are treated as already expired.
+const NameTTL = 7 * 24 * time.Hour
+
 // Ping status values returned in Device.PingStatus.
 const (
 	PingStatusOnline  = "online"
@@ -263,6 +274,44 @@ func (d *Device) HasRecentDNS(threshold time.Duration) bool {
 		return false
 	}
 	return time.Since(d.LastDNSQuery) < threshold
+}
+
+// hostnameKey normalizes a name for identity comparison (case, .local, DNS chars).
+func hostnameKey(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, ".")
+	s = strings.ToLower(s)
+	s = strings.TrimSuffix(s, ".local")
+	return SanitizeDNSName(s)
+}
+
+// HasIdentity reports whether the device already has a name.
+func (d *Device) HasIdentity() bool {
+	if d == nil {
+		return false
+	}
+	return d.DNSName != "" || len(d.Hostnames) > 0 || len(d.MDNSNames) > 0 || d.ManualName != ""
+}
+
+// HasHostnameKey reports whether any of this device's names normalize to key.
+func (d *Device) HasHostnameKey(key string) bool {
+	if d == nil || key == "" {
+		return false
+	}
+	if hostnameKey(d.DNSName) == key || hostnameKey(d.ManualName) == key {
+		return true
+	}
+	for _, h := range d.Hostnames {
+		if hostnameKey(h) == key {
+			return true
+		}
+	}
+	for _, m := range d.MDNSNames {
+		if hostnameKey(m) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // PingTarget returns the address to probe: IPv4 preferred, then IPv6.

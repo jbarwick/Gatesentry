@@ -52,23 +52,25 @@ func (ds *DeviceStore) SetPersistPath(filePath string) {
 // We include all identity and network fields, but omit transient ping
 // state (Online / PingStatus), which is probed when the devices page opens.
 type persistedDevice struct {
-	ID           string            `json:"id"`
-	DisplayName  string            `json:"display_name"`
-	DNSName      string            `json:"dns_name"`
-	Hostnames    []string          `json:"hostnames,omitempty"`
-	MDNSNames    []string          `json:"mdns_names,omitempty"`
-	MACs         []string          `json:"macs,omitempty"`
-	IPv4         string            `json:"ipv4,omitempty"`
-	IPv6         string            `json:"ipv6,omitempty"`
-	Source       DiscoverySource   `json:"source"`
-	Sources      []DiscoverySource `json:"sources,omitempty"`
-	FirstSeen    time.Time         `json:"first_seen"`
-	LastSeen     time.Time         `json:"last_seen"`
-	LastDNSQuery time.Time         `json:"last_dns_query,omitempty"`
-	ManualName   string            `json:"manual_name,omitempty"`
-	Owner        string            `json:"owner,omitempty"`
-	Category     string            `json:"category,omitempty"`
-	Persistent   bool              `json:"persistent"`
+	ID           string               `json:"id"`
+	DisplayName  string               `json:"display_name"`
+	DNSName      string               `json:"dns_name"`
+	Hostnames    []string             `json:"hostnames,omitempty"`
+	MDNSNames    []string             `json:"mdns_names,omitempty"`
+	HostnameSeen map[string]time.Time `json:"hostname_seen,omitempty"`
+	MDNSNameSeen map[string]time.Time `json:"mdns_name_seen,omitempty"`
+	MACs         []string             `json:"macs,omitempty"`
+	IPv4         string               `json:"ipv4,omitempty"`
+	IPv6         string               `json:"ipv6,omitempty"`
+	Source       DiscoverySource      `json:"source"`
+	Sources      []DiscoverySource    `json:"sources,omitempty"`
+	FirstSeen    time.Time            `json:"first_seen"`
+	LastSeen     time.Time            `json:"last_seen"`
+	LastDNSQuery time.Time            `json:"last_dns_query,omitempty"`
+	ManualName   string               `json:"manual_name,omitempty"`
+	Owner        string               `json:"owner,omitempty"`
+	Category     string               `json:"category,omitempty"`
+	Persistent   bool                 `json:"persistent"`
 }
 
 // persistedStore is the top-level JSON structure written to disk.
@@ -125,6 +127,8 @@ func (ds *DeviceStore) saveToDisk() error {
 			DNSName:      d.DNSName,
 			Hostnames:    d.Hostnames,
 			MDNSNames:    d.MDNSNames,
+			HostnameSeen: d.HostnameSeen,
+			MDNSNameSeen: d.MDNSNameSeen,
 			MACs:         d.MACs,
 			IPv4:         d.IPv4,
 			IPv6:         d.IPv6,
@@ -216,6 +220,8 @@ func (ds *DeviceStore) loadFromDisk() error {
 			DNSName:      pd.DNSName,
 			Hostnames:    pd.Hostnames,
 			MDNSNames:    pd.MDNSNames,
+			HostnameSeen: pd.HostnameSeen,
+			MDNSNameSeen: pd.MDNSNameSeen,
 			MACs:         pd.MACs,
 			IPv4:         pd.IPv4,
 			IPv6:         pd.IPv6,

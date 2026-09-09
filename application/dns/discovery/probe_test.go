@@ -11,12 +11,12 @@ func TestProbeReachability_UsesPingResult(t *testing.T) {
 	ds := NewDeviceStore("local")
 	onlineID := ds.UpsertDevice(&Device{
 		Hostnames: []string{"laptop"},
-		IPv4:      "192.168.1.10",
+		IPv4:      "192.0.2.10",
 		Source:    SourceManual,
 	})
 	offlineID := ds.UpsertDevice(&Device{
 		Hostnames: []string{"printer"},
-		IPv4:      "192.168.1.20",
+		IPv4:      "192.0.2.20",
 		Source:    SourceManual,
 	})
 	noIPID := ds.UpsertDevice(&Device{
@@ -25,7 +25,7 @@ func TestProbeReachability_UsesPingResult(t *testing.T) {
 	})
 
 	fake := func(_ context.Context, ip string, _ time.Duration) (time.Duration, error) {
-		if ip == "192.168.1.10" {
+		if ip == "192.0.2.10" {
 			return 4 * time.Millisecond, nil
 		}
 		return 0, errors.New("no reply")
@@ -65,7 +65,7 @@ func TestProbeReachability_DoesNotTreatDiscoveryAsOnline(t *testing.T) {
 	ds := NewDeviceStore("local")
 	id := ds.UpsertDevice(&Device{
 		Hostnames: []string{"quiet-tv"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		Source:    SourceMDNS,
 	})
 	d := ds.GetDevice(id)
@@ -81,7 +81,7 @@ func TestTouchDevice_SetsLastDNSQueryWithoutOnline(t *testing.T) {
 	ds := NewDeviceStore("local")
 	id := ds.UpsertDevice(&Device{
 		Hostnames: []string{"phone"},
-		IPv4:      "192.168.1.30",
+		IPv4:      "192.0.2.30",
 		Source:    SourcePassive,
 	})
 	ds.TouchDevice(id)
@@ -98,7 +98,7 @@ func TestUpsertPreservesPingAndDNS(t *testing.T) {
 	ds := NewDeviceStore("local")
 	id := ds.UpsertDevice(&Device{
 		Hostnames: []string{"nas"},
-		IPv4:      "192.168.1.5",
+		IPv4:      "192.0.2.5",
 		Source:    SourceDDNS,
 	})
 	ds.applyPingResults([]pingResult{{
@@ -113,7 +113,7 @@ func TestUpsertPreservesPingAndDNS(t *testing.T) {
 	ds.UpsertDevice(&Device{
 		ID:        id,
 		Hostnames: []string{"nas"},
-		IPv4:      "192.168.1.5",
+		IPv4:      "192.0.2.5",
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
 	})
@@ -146,8 +146,8 @@ func TestHasRecentDNS(t *testing.T) {
 }
 
 func TestPingTarget(t *testing.T) {
-	d := &Device{IPv4: "192.168.1.1", IPv6: "fd00::1"}
-	if d.PingTarget() != "192.168.1.1" {
+	d := &Device{IPv4: "192.0.2.1", IPv6: "fd00::1"}
+	if d.PingTarget() != "192.0.2.1" {
 		t.Errorf("prefer IPv4, got %q", d.PingTarget())
 	}
 	d.IPv4 = ""

@@ -9,10 +9,10 @@ import (
 // --- ExtractClientIP tests ---
 
 func TestExtractClientIP_TCPAddr(t *testing.T) {
-	addr := &net.TCPAddr{IP: net.ParseIP("192.168.1.100"), Port: 12345}
+	addr := &net.TCPAddr{IP: net.ParseIP("192.0.2.100"), Port: 12345}
 	got := ExtractClientIP(addr)
-	if got != "192.168.1.100" {
-		t.Errorf("ExtractClientIP(TCPAddr) = %q, want %q", got, "192.168.1.100")
+	if got != "192.0.2.100" {
+		t.Errorf("ExtractClientIP(TCPAddr) = %q, want %q", got, "192.0.2.100")
 	}
 }
 
@@ -64,18 +64,18 @@ func TestObservePassiveQuery_SkipsEmpty(t *testing.T) {
 func TestObservePassiveQuery_CreatesNewDevice(t *testing.T) {
 	ds := NewDeviceStore("local")
 
-	ds.ObservePassiveQuery("192.168.1.100")
+	ds.ObservePassiveQuery("192.0.2.100")
 
 	if ds.DeviceCount() != 1 {
 		t.Fatalf("Expected 1 device, got %d", ds.DeviceCount())
 	}
 
-	device := ds.FindDeviceByIP("192.168.1.100")
+	device := ds.FindDeviceByIP("192.0.2.100")
 	if device == nil {
 		t.Fatal("Expected to find device by IP")
 	}
-	if device.IPv4 != "192.168.1.100" {
-		t.Errorf("Expected IPv4 192.168.1.100, got %s", device.IPv4)
+	if device.IPv4 != "192.0.2.100" {
+		t.Errorf("Expected IPv4 192.0.2.100, got %s", device.IPv4)
 	}
 	if device.Source != SourcePassive {
 		t.Errorf("Expected source passive, got %s", device.Source)
@@ -111,14 +111,14 @@ func TestObservePassiveQuery_TouchesKnownDevice(t *testing.T) {
 	// Create a device with an old LastSeen
 	id := ds.UpsertDevice(&Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		Source:    SourceManual,
 		Sources:   []DiscoverySource{SourceManual},
 		LastSeen:  time.Now().Add(-10 * time.Minute),
 	})
 
 	// Observe a query from the same IP
-	ds.ObservePassiveQuery("192.168.1.50")
+	ds.ObservePassiveQuery("192.0.2.50")
 
 	// Should still be 1 device (no duplicates)
 	if ds.DeviceCount() != 1 {
@@ -144,7 +144,7 @@ func TestObservePassiveQuery_UpdatesIPForKnownMAC(t *testing.T) {
 	// Create a device with a known MAC
 	id := ds.UpsertDevice(&Device{
 		Hostnames: []string{"laptop"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		MACs:      []string{"aa:bb:cc:dd:ee:ff"},
 		Source:    SourceLease,
 		Sources:   []DiscoverySource{SourceLease},
@@ -160,8 +160,8 @@ func TestObservePassiveQuery_UpdatesIPForKnownMAC(t *testing.T) {
 	if device == nil {
 		t.Fatal("Expected original device to exist")
 	}
-	if device.IPv4 != "192.168.1.50" {
-		t.Errorf("Expected IPv4 192.168.1.50, got %s", device.IPv4)
+	if device.IPv4 != "192.0.2.50" {
+		t.Errorf("Expected IPv4 192.0.2.50, got %s", device.IPv4)
 	}
 }
 
@@ -181,9 +181,9 @@ func TestObservePassiveQuery_NoDuplicates(t *testing.T) {
 func TestObservePassiveQuery_MultipleIPs(t *testing.T) {
 	ds := NewDeviceStore("local")
 
-	ds.ObservePassiveQuery("192.168.1.1")
-	ds.ObservePassiveQuery("192.168.1.2")
-	ds.ObservePassiveQuery("192.168.1.3")
+	ds.ObservePassiveQuery("192.0.2.1")
+	ds.ObservePassiveQuery("192.0.2.2")
+	ds.ObservePassiveQuery("192.0.2.3")
 
 	if ds.DeviceCount() != 3 {
 		t.Errorf("Expected 3 devices, got %d", ds.DeviceCount())
@@ -195,7 +195,7 @@ func TestObservePassiveQuery_MultipleIPs(t *testing.T) {
 func TestLookupARPEntry_MissingProc(t *testing.T) {
 	// On systems without /proc/net/arp (CI, containers), should return ""
 	// This test verifies graceful failure
-	mac := LookupARPEntry("192.168.1.1")
+	mac := LookupARPEntry("192.0.2.1")
 	// We can't assert a specific value since /proc/net/arp may or may not exist
 	// Just verify it doesn't panic and returns a string
 	_ = mac

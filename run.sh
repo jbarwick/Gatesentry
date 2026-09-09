@@ -7,10 +7,11 @@ export GATESENTRY_DNS_ADDR="${GATESENTRY_DNS_ADDR:-0.0.0.0}"
 # Set the DNS port (default: 10053 for local dev, avoids conflict with system DNS)
 export GATESENTRY_DNS_PORT="${GATESENTRY_DNS_PORT:-10053}"
 
-# Set the external resolver (default: local network DNS)
-# 192.168.1.1 is the authoritative DNS for the local network,
-# including custom records (e.g. httpbin.org → 192.168.1.105)
-export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.168.1.1:53}"
+# Upstream resolver. Leave unset to keep the stored setting / 8.8.8.8 default.
+# Override per site, e.g. GATESENTRY_DNS_RESOLVER=192.0.2.1:53
+if [ -n "${GATESENTRY_DNS_RESOLVER:-}" ]; then
+	export GATESENTRY_DNS_RESOLVER
+fi
 
 # Admin UI port — default 80 requires root; use 8080 for local dev
 export GS_ADMIN_PORT="${GS_ADMIN_PORT:-8080}"

@@ -22,14 +22,14 @@ func TestPersistRoundTrip(t *testing.T) {
 
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.10",
+		IPv4:      "192.0.2.10",
 		Source:    SourceDDNS,
 		FirstSeen: time.Now(),
 		LastSeen:  time.Now(),
 	})
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"printer"},
-		IPv4:      "192.168.1.20",
+		IPv4:      "192.0.2.20",
 		Source:    SourceMDNS,
 		FirstSeen: time.Now(),
 		LastSeen:  time.Now(),
@@ -69,8 +69,8 @@ func TestPersistRoundTrip(t *testing.T) {
 	for _, d := range devices {
 		if d.DNSName == "macmini" {
 			found = true
-			if d.IPv4 != "192.168.1.10" {
-				t.Errorf("macmini IPv4 = %q, want 192.168.1.10", d.IPv4)
+			if d.IPv4 != "192.0.2.10" {
+				t.Errorf("macmini IPv4 = %q, want 192.0.2.10", d.IPv4)
 			}
 			if d.Source != SourceDDNS {
 				t.Errorf("macmini Source = %v, want %v", d.Source, SourceDDNS)
@@ -100,19 +100,19 @@ func TestPersistEphemeralFiltering(t *testing.T) {
 	// Device with DNS name — should be persisted
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"laptop"},
-		IPv4:      "192.168.1.30",
+		IPv4:      "192.0.2.30",
 		Source:    SourceDDNS,
 	})
 
 	// Ephemeral IP-only device — should NOT be persisted
 	ds.UpsertDevice(&Device{
-		IPv4:   "192.168.1.99",
+		IPv4:   "192.0.2.99",
 		Source: SourcePassive,
 	})
 
 	// Persistent flag set but no DNS name — should be persisted
 	ds.UpsertDevice(&Device{
-		IPv4:       "192.168.1.100",
+		IPv4:       "192.0.2.100",
 		Source:     SourcePassive,
 		Persistent: true,
 	})
@@ -226,7 +226,7 @@ func TestPersistDNSRecordsRebuilt(t *testing.T) {
 	}
 	ds1.UpsertDevice(&Device{
 		Hostnames: []string{"webserver"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		Source:    SourceDDNS,
 	})
 	if err := ds1.SaveNow(); err != nil {
@@ -254,9 +254,9 @@ func TestPersistDNSRecordsRebuilt(t *testing.T) {
 	}
 
 	// PTR reverse lookup should also work
-	reverseRecords := ds2.LookupReverse("50.1.168.192.in-addr.arpa.")
+	reverseRecords := ds2.LookupReverse("50.2.0.192.in-addr.arpa.")
 	if len(reverseRecords) == 0 {
-		t.Error("no PTR records for 50.1.168.192.in-addr.arpa. after loading from disk")
+		t.Error("no PTR records for 50.2.0.192.in-addr.arpa. after loading from disk")
 	}
 }
 
@@ -266,5 +266,40 @@ func TestSaveNowNoPersist(t *testing.T) {
 	// persist is nil — should return nil, not panic
 	if err := ds.SaveNow(); err != nil {
 		t.Errorf("SaveNow() with no persist should return nil, got: %v", err)
+	}
+}
+
+func TestLoadExpiresUnstampedExtraNames(t *testing.T) {
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "devices.json")
+	raw := `{
+  "version": 1,
+  "saved": "2026-01-01T00:00:00Z",
+  "devices": [{
+    "id": "dev-1",
+    "dns_name": "wrong-alias",
+    "hostnames": ["wrong-alias", "realname"],
+    "mdns_names": ["OldService"],
+    "ipv4": "192.0.2.50",
+    "source": "mdns",
+    "first_seen": "2026-01-01T00:00:00Z",
+    "last_seen": "2026-01-01T00:00:00Z"
+  }]
+}`
+	if err := os.WriteFile(fp, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ds := NewDeviceStoreMultiZone("local")
+	ds.SetPersistPath(fp)
+	d := ds.GetDevice("dev-1")
+	if d == nil {
+		t.Fatal("expected device to load")
+	}
+	if len(d.Hostnames) != 1 || hostnameKey(d.Hostnames[0]) != "wrong-alias" {
+		t.Errorf("primary hostname should be kept, got %v", d.Hostnames)
+	}
+	if len(d.MDNSNames) != 0 {
+		t.Errorf("unstamped mDNS aliases should expire on load, got %v", d.MDNSNames)
 	}
 }

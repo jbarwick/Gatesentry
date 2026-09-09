@@ -1,6 +1,9 @@
 #!/bin/bash
 
-export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.168.1.1:53}"
+# Do not default to a site LAN resolver; stored settings or 8.8.8.8 apply.
+if [ -n "${GATESENTRY_DNS_RESOLVER:-}" ]; then
+	export GATESENTRY_DNS_RESOLVER
+fi
 
 # Admin UI port — default 80 requires root; use 8080 for local dev
 export GS_ADMIN_PORT="${GS_ADMIN_PORT:-8080}"

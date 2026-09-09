@@ -169,7 +169,7 @@ func TestHandleDDNSUpdate_ReverseZoneIPv4_AcceptedNoOp(t *testing.T) {
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("1.168.192.in-addr.arpa")
 	// Simulate pfSense sending a PTR update for the reverse zone
-	addUpdateRR(m, "100.1.168.192.in-addr.arpa. 300 IN PTR macmini.local.")
+	addUpdateRR(m, "100.2.0.192.in-addr.arpa. 300 IN PTR macmini.local.")
 
 	handleDDNSUpdate(w, m)
 
@@ -230,7 +230,7 @@ func TestHandleDDNSUpdate_ReverseZone_StillRejectWhenDisabled(t *testing.T) {
 func TestParseDDNSUpdates_Adds(t *testing.T) {
 	var rrs []dns.RR
 
-	aRR, _ := dns.NewRR("macmini.local. 300 IN A 192.168.1.100")
+	aRR, _ := dns.NewRR("macmini.local. 300 IN A 192.0.2.100")
 	rrs = append(rrs, aRR)
 
 	aaaaRR, _ := dns.NewRR("macmini.local. 300 IN AAAA fd00::24a")
@@ -245,7 +245,7 @@ func TestParseDDNSUpdates_Adds(t *testing.T) {
 		t.Fatalf("Expected 0 deletes, got %d", len(deletes))
 	}
 
-	if adds[0].name != "macmini.local" || adds[0].rrtype != dns.TypeA || adds[0].value != "192.168.1.100" {
+	if adds[0].name != "macmini.local" || adds[0].rrtype != dns.TypeA || adds[0].value != "192.0.2.100" {
 		t.Errorf("Unexpected first add: %+v", adds[0])
 	}
 	if adds[1].name != "macmini.local" || adds[1].rrtype != dns.TypeAAAA || adds[1].value != "fd00::24a" {
@@ -284,7 +284,7 @@ func TestParseDDNSUpdates_DeleteSpecific(t *testing.T) {
 	var rrs []dns.RR
 
 	// Delete a specific A record (ClassNONE with value)
-	rr, _ := dns.NewRR("macmini.local. 0 IN A 192.168.1.100")
+	rr, _ := dns.NewRR("macmini.local. 0 IN A 192.0.2.100")
 	rr.Header().Class = dns.ClassNONE
 	rr.Header().Ttl = 0
 	rrs = append(rrs, rr)
@@ -297,8 +297,8 @@ func TestParseDDNSUpdates_DeleteSpecific(t *testing.T) {
 	if len(deletes) != 1 {
 		t.Fatalf("Expected 1 delete, got %d", len(deletes))
 	}
-	if deletes[0].class != dns.ClassNONE || deletes[0].value != "192.168.1.100" {
-		t.Errorf("Expected ClassNONE delete with value 192.168.1.100, got class=%d value=%q",
+	if deletes[0].class != dns.ClassNONE || deletes[0].value != "192.0.2.100" {
+		t.Errorf("Expected ClassNONE delete with value 192.0.2.100, got class=%d value=%q",
 			deletes[0].class, deletes[0].value)
 	}
 }
@@ -307,13 +307,13 @@ func TestParseDDNSUpdates_Mixed(t *testing.T) {
 	var rrs []dns.RR
 
 	// Delete old IP
-	delRR, _ := dns.NewRR("macmini.local. 0 IN A 192.168.1.100")
+	delRR, _ := dns.NewRR("macmini.local. 0 IN A 192.0.2.100")
 	delRR.Header().Class = dns.ClassNONE
 	delRR.Header().Ttl = 0
 	rrs = append(rrs, delRR)
 
 	// Add new IP
-	addRR, _ := dns.NewRR("macmini.local. 300 IN A 192.168.1.101")
+	addRR, _ := dns.NewRR("macmini.local. 300 IN A 192.0.2.101")
 	rrs = append(rrs, addRR)
 
 	adds, deletes := parseDDNSUpdates(rrs, "local")
@@ -322,11 +322,11 @@ func TestParseDDNSUpdates_Mixed(t *testing.T) {
 		t.Fatalf("Expected 1 add + 1 delete, got %d adds + %d deletes",
 			len(adds), len(deletes))
 	}
-	if deletes[0].value != "192.168.1.100" {
-		t.Errorf("Expected delete of 192.168.1.100, got %q", deletes[0].value)
+	if deletes[0].value != "192.0.2.100" {
+		t.Errorf("Expected delete of 192.0.2.100, got %q", deletes[0].value)
 	}
-	if adds[0].value != "192.168.1.101" {
-		t.Errorf("Expected add of 192.168.1.101, got %q", adds[0].value)
+	if adds[0].value != "192.0.2.101" {
+		t.Errorf("Expected add of 192.0.2.101, got %q", adds[0].value)
 	}
 }
 
@@ -368,7 +368,7 @@ func TestHandleDDNSUpdate_AddA(t *testing.T) {
 
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 
 	handleDDNSUpdate(w, m)
 
@@ -384,12 +384,12 @@ func TestHandleDDNSUpdate_AddA(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("Expected 1 A record, got %d", len(records))
 	}
-	if records[0].Value != "192.168.1.100" {
-		t.Errorf("Expected 192.168.1.100, got %s", records[0].Value)
+	if records[0].Value != "192.0.2.100" {
+		t.Errorf("Expected 192.0.2.100, got %s", records[0].Value)
 	}
 
 	// Verify device exists and has DDNS source
-	device := deviceStore.FindDeviceByIP("192.168.1.100")
+	device := deviceStore.FindDeviceByIP("192.0.2.100")
 	if device == nil {
 		t.Fatal("Expected device to exist")
 	}
@@ -401,7 +401,7 @@ func TestHandleDDNSUpdate_AddA(t *testing.T) {
 	}
 
 	// Verify PTR record was generated
-	ptrRecords := deviceStore.LookupReverse("100.1.168.192.in-addr.arpa")
+	ptrRecords := deviceStore.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(ptrRecords) != 1 {
 		t.Fatalf("Expected 1 PTR record, got %d", len(ptrRecords))
 	}
@@ -441,7 +441,7 @@ func TestHandleDDNSUpdate_AddDualStack(t *testing.T) {
 
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 	addUpdateRR(m, "macmini.local. 300 IN AAAA fd00::24a")
 
 	handleDDNSUpdate(w, m)
@@ -461,12 +461,12 @@ func TestHandleDDNSUpdate_AddDualStack(t *testing.T) {
 		t.Errorf("Expected 1 device, got %d", deviceStore.DeviceCount())
 	}
 
-	device := deviceStore.FindDeviceByIP("192.168.1.100")
+	device := deviceStore.FindDeviceByIP("192.0.2.100")
 	if device == nil {
 		t.Fatal("Expected device")
 	}
-	if device.IPv4 != "192.168.1.100" {
-		t.Errorf("Expected IPv4 192.168.1.100, got %s", device.IPv4)
+	if device.IPv4 != "192.0.2.100" {
+		t.Errorf("Expected IPv4 192.0.2.100, got %s", device.IPv4)
 	}
 	if device.IPv6 != "fd00::24a" {
 		t.Errorf("Expected IPv6 fd00::24a, got %s", device.IPv6)
@@ -480,7 +480,7 @@ func TestHandleDDNSUpdate_DeleteByName(t *testing.T) {
 	// First create a device
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"oldhost"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		Source:    discovery.SourceDDNS,
 		Sources:   []discovery.DiscoverySource{discovery.SourceDDNS},
 	})
@@ -526,7 +526,7 @@ func TestHandleDDNSUpdate_DeleteSpecificRR(t *testing.T) {
 	// Create a dual-stack device
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		IPv6:      "fd00::24a",
 		Source:    discovery.SourceDDNS,
 		Sources:   []discovery.DiscoverySource{discovery.SourceDDNS},
@@ -535,7 +535,7 @@ func TestHandleDDNSUpdate_DeleteSpecificRR(t *testing.T) {
 	// Delete only the A record (ClassNONE, specific value)
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	delRR, _ := dns.NewRR("macmini.local. 0 IN A 192.168.1.100")
+	delRR, _ := dns.NewRR("macmini.local. 0 IN A 192.0.2.100")
 	delRR.Header().Class = dns.ClassNONE
 	delRR.Header().Ttl = 0
 	m.Ns = append(m.Ns, delRR)
@@ -576,10 +576,10 @@ func TestHandleDDNSUpdate_DeleteThenAdd(t *testing.T) {
 	cleanup := setupDDNSTestServer(t)
 	defer cleanup()
 
-	// Create initial device (DHCP lease assigned 192.168.1.100)
+	// Create initial device (DHCP lease assigned 192.0.2.100)
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"laptop"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    discovery.SourceDDNS,
 		Sources:   []discovery.DiscoverySource{discovery.SourceDDNS},
 	})
@@ -589,13 +589,13 @@ func TestHandleDDNSUpdate_DeleteThenAdd(t *testing.T) {
 	m := makeUpdateMsg("local")
 
 	// Delete old A record
-	delRR, _ := dns.NewRR("laptop.local. 0 IN A 192.168.1.100")
+	delRR, _ := dns.NewRR("laptop.local. 0 IN A 192.0.2.100")
 	delRR.Header().Class = dns.ClassNONE
 	delRR.Header().Ttl = 0
 	m.Ns = append(m.Ns, delRR)
 
 	// Add new A record
-	addUpdateRR(m, "laptop.local. 300 IN A 192.168.1.101")
+	addUpdateRR(m, "laptop.local. 300 IN A 192.0.2.101")
 
 	handleDDNSUpdate(w, m)
 
@@ -613,16 +613,16 @@ func TestHandleDDNSUpdate_DeleteThenAdd(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("Expected 1 A record, got %d", len(records))
 	}
-	if records[0].Value != "192.168.1.101" {
-		t.Errorf("Expected new IP 192.168.1.101, got %s", records[0].Value)
+	if records[0].Value != "192.0.2.101" {
+		t.Errorf("Expected new IP 192.0.2.101, got %s", records[0].Value)
 	}
 
 	// Old reverse PTR should be gone, new one present
-	oldPTR := deviceStore.LookupReverse("100.1.168.192.in-addr.arpa")
+	oldPTR := deviceStore.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(oldPTR) != 0 {
 		t.Errorf("Expected old PTR to be gone, got %d records", len(oldPTR))
 	}
-	newPTR := deviceStore.LookupReverse("101.1.168.192.in-addr.arpa")
+	newPTR := deviceStore.LookupReverse("101.2.0.192.in-addr.arpa")
 	if len(newPTR) != 1 {
 		t.Errorf("Expected new PTR, got %d records", len(newPTR))
 	}
@@ -659,7 +659,7 @@ func TestHandleDDNSUpdate_Disabled(t *testing.T) {
 
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 
 	handleDDNSUpdate(w, m)
 
@@ -692,11 +692,11 @@ func TestHandleDDNSUpdate_EnrichPassiveDevice(t *testing.T) {
 	defer cleanup()
 
 	// Passive discovery created a nameless device
-	deviceStore.ObservePassiveQuery("192.168.1.42")
+	deviceStore.ObservePassiveQuery("192.0.2.42")
 	if deviceStore.DeviceCount() != 1 {
 		t.Fatalf("Expected 1 passive device, got %d", deviceStore.DeviceCount())
 	}
-	passiveDevice := deviceStore.FindDeviceByIP("192.168.1.42")
+	passiveDevice := deviceStore.FindDeviceByIP("192.0.2.42")
 	if passiveDevice == nil {
 		t.Fatal("Expected passive device")
 	}
@@ -705,7 +705,7 @@ func TestHandleDDNSUpdate_EnrichPassiveDevice(t *testing.T) {
 	// DDNS UPDATE names the device
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "viviennes-ipad.local. 300 IN A 192.168.1.42")
+	addUpdateRR(m, "viviennes-ipad.local. 300 IN A 192.0.2.42")
 
 	handleDDNSUpdate(w, m)
 
@@ -718,7 +718,7 @@ func TestHandleDDNSUpdate_EnrichPassiveDevice(t *testing.T) {
 		t.Errorf("Expected 1 device after enrichment, got %d", deviceStore.DeviceCount())
 	}
 
-	device := deviceStore.FindDeviceByIP("192.168.1.42")
+	device := deviceStore.FindDeviceByIP("192.0.2.42")
 	if device == nil {
 		t.Fatal("Expected device")
 	}
@@ -752,7 +752,7 @@ func TestHandleDDNSUpdate_MultiZone(t *testing.T) {
 	// UPDATE targets the primary zone
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("jvj28.com")
-	addUpdateRR(m, "macmini.jvj28.com. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.jvj28.com. 300 IN A 192.0.2.100")
 
 	handleDDNSUpdate(w, m)
 
@@ -771,7 +771,7 @@ func TestHandleDDNSUpdate_MultiZone(t *testing.T) {
 	}
 
 	// PTR should point to primary zone
-	ptrRecs := deviceStore.LookupReverse("100.1.168.192.in-addr.arpa")
+	ptrRecs := deviceStore.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(ptrRecs) != 1 {
 		t.Fatalf("Expected 1 PTR, got %d", len(ptrRecs))
 	}
@@ -789,7 +789,7 @@ func TestHandleDDNSUpdate_MultiZone_SecondaryZoneUpdate(t *testing.T) {
 	// UPDATE targets the secondary zone (.local) — should also work
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "printer.local. 300 IN A 192.168.1.50")
+	addUpdateRR(m, "printer.local. 300 IN A 192.0.2.50")
 
 	handleDDNSUpdate(w, m)
 
@@ -820,7 +820,7 @@ func TestHandleDDNSUpdate_TSIGValid(t *testing.T) {
 	w.tsigErr = nil // TSIG verification passed
 
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 	m.SetTsig("dhcp-key.", dns.HmacSHA256, 300, time.Now().Unix())
 
 	handleDDNSUpdate(w, m)
@@ -843,7 +843,7 @@ func TestHandleDDNSUpdate_TSIGInvalid(t *testing.T) {
 	w.tsigErr = fmt.Errorf("TSIG verification failed") // Simulates bad key
 
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 	m.SetTsig("dhcp-key.", dns.HmacSHA256, 300, time.Now().Unix())
 
 	handleDDNSUpdate(w, m)
@@ -864,7 +864,7 @@ func TestHandleDDNSUpdate_TSIGMissing_Required(t *testing.T) {
 
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 	// No TSIG on message
 
 	handleDDNSUpdate(w, m)
@@ -883,7 +883,7 @@ func TestHandleDDNSUpdate_TSIGOptional_NoTSIG(t *testing.T) {
 
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 	// No TSIG on message — should be accepted since not required
 
 	handleDDNSUpdate(w, m)
@@ -907,7 +907,7 @@ func TestHandleDDNSUpdate_TSIGOptional_PresentButInvalid(t *testing.T) {
 	w.tsigErr = fmt.Errorf("bad key") // TSIG present but verification failed
 
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "macmini.local. 300 IN A 192.168.1.100")
+	addUpdateRR(m, "macmini.local. 300 IN A 192.0.2.100")
 	m.SetTsig("bad-key.", dns.HmacSHA256, 300, time.Now().Unix())
 
 	handleDDNSUpdate(w, m)
@@ -929,7 +929,7 @@ func TestHandleDNSRequest_RoutesUpdateToDDNS(t *testing.T) {
 
 	w := newDDNSMockWriter()
 	m := makeUpdateMsg("local")
-	addUpdateRR(m, "router.local. 300 IN A 192.168.1.1")
+	addUpdateRR(m, "router.local. 300 IN A 192.0.2.1")
 
 	// Call the main handler — should dispatch to DDNS
 	handleDNSRequest(w, m)
@@ -956,7 +956,7 @@ func TestHandleDNSRequest_StandardQueryNotAffected(t *testing.T) {
 	// Add a device so a standard query can find it
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    discovery.SourceDDNS,
 		Sources:   []discovery.DiscoverySource{discovery.SourceDDNS},
 	})
@@ -986,7 +986,7 @@ func TestHandleDDNSUpdate_PersistentDeviceSurvivesDelete(t *testing.T) {
 	// Create a persistent (manually named) device
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames:  []string{"nas"},
-		IPv4:       "192.168.1.200",
+		IPv4:       "192.0.2.200",
 		Source:     discovery.SourceManual,
 		Sources:    []discovery.DiscoverySource{discovery.SourceManual},
 		ManualName: "Dad's NAS",

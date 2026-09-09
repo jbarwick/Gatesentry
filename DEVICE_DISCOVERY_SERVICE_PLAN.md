@@ -169,12 +169,12 @@ type Device struct {
 When a device's IP changes (DHCP renewal), DNS records update automatically:
 
 ```
-Device: "Mac Mini" at 192.168.1.100 and fd00:1234:5678::24a
+Device: "Mac Mini" at 192.0.2.100 and 2001:db8::24a
 
 Auto-generated DNS records:
-  A     macmini.local          → 192.168.1.100
-  AAAA  macmini.local          → fd00:1234:5678::24a
-  PTR   100.1.168.192.in-addr.arpa → macmini.local
+  A     macmini.local          → 192.0.2.100
+  AAAA  macmini.local          → 2001:db8::24a
+  PTR   100.2.0.192.in-addr.arpa → macmini.local
   PTR   a.4.2.0...ip6.arpa    → macmini.local
 ```
 
@@ -224,11 +224,11 @@ This means **MAC address is not a reliable primary identifier** for devices.
 
 **Hostname is the primary identifier, not MAC.** The matching priority:
 
-1. **DDNS update arrives** with hostname "macmini" and IP 192.168.1.100 → Find or create
+1. **DDNS update arrives** with hostname "macmini" and IP 192.0.2.100 → Find or create
    device by hostname "macmini", update IP
-2. **mDNS discovery** finds "Viviennes-iPad" at 192.168.1.42 → Find or create device by
+2. **mDNS discovery** finds "Viviennes-iPad" at 192.0.2.42 → Find or create device by
    mDNS name, update IP
-3. **Passive DNS** sees queries from 192.168.1.105 → Find device with that IP, or create
+3. **Passive DNS** sees queries from 192.0.2.105 → Find device with that IP, or create
    unknown device
 4. **MAC changes** — if hostname stays the same but MAC changes, we update the MAC on the
    existing device (hostname is primary key, not MAC)
@@ -248,7 +248,7 @@ queries). They click it, type a name. Done. The system already knows its IP and 
 tracking it. When the IP changes, the DNS records update automatically.
 
 ```
-UI: Unknown device at 192.168.1.105 (MAC: 94:18:65:5d:b4:f9)
+UI: Unknown device at 192.0.2.105 (MAC: 94:18:65:5d:b4:f9)
      [Name this device: ________________]  [Save]
 ```
 
@@ -260,7 +260,7 @@ auto-named. IP tracked automatically.
 
 **Mode C — "Fixed entry" (legacy, current behavior)**
 
-User types: Name = "nas.local", IP = "192.168.1.200". Static entry. This is what
+User types: Name = "nas.local", IP = "192.0.2.200". Static entry. This is what
 `DNSCustomEntry` does today — still supported for servers with truly static IPs.
 
 ---
@@ -271,9 +271,9 @@ The web UI gets a new "Devices" page showing a network inventory:
 
 | Status | Name | DNS Name | IPv4 | IPv6 | MAC | Via | Last Seen |
 |--------|------|----------|------|------|-----|-----|-----------|
-| 🟢 | Vivienne's iPad | viviennes-ipad | 192.168.1.42 | fd00::1a3 | c8:5e:... | mDNS + passive | 2 min ago |
-| 🟢 | Mac Mini | macmini | 192.168.1.100 | fd00::24a | 3c:22:... | DDNS | 30 sec ago |
-| 🟡 | *(click to name)* | — | 192.168.1.105 | — | 94:18:... | passive | 3 hrs ago |
+| 🟢 | Vivienne's iPad | viviennes-ipad | 192.0.2.42 | fd00::1a3 | c8:5e:... | mDNS + passive | 2 min ago |
+| 🟢 | Mac Mini | macmini | 192.0.2.100 | fd00::24a | 3c:22:... | DDNS | 30 sec ago |
+| 🟡 | *(click to name)* | — | 192.0.2.105 | — | 94:18:... | passive | 3 hrs ago |
 | ⚫ | Dad's Printer | printer | — | — | e4:11:... | manual | 3 days ago |
 
 Status indicators:
@@ -523,8 +523,8 @@ When KEA or ISC dhcpd assigns a lease, it sends:
 ;; (empty or conditions)
 
 ;; UPDATE SECTION:
-;; macmini.local.  300  IN  A     192.168.1.100
-;; macmini.local.  300  IN  AAAA  fd00:1234:5678::24a
+;; macmini.local.  300  IN  A     192.0.2.100
+;; macmini.local.  300  IN  AAAA  2001:db8::24a
 ```
 
 Gatesentry receives this, verifies the TSIG signature, and updates the device inventory.
@@ -563,7 +563,7 @@ Gatesentry provides the **internal view** — devices on the LAN resolve to loca
 
 ```
 External (CloudNS):  jvj28.com → public IP (VPN, web, etc.)
-Internal (Gatesentry): macmini.jvj28.com → 192.168.1.100
+Internal (Gatesentry): macmini.jvj28.com → 192.0.2.100
 
 Query from LAN client → Gatesentry answers from device inventory
 Query from internet → CloudNS answers from public zone
@@ -621,8 +621,8 @@ With the device store in place, the DNS handler gains the ability to identify th
 querying device:
 
 ```
-DNS query arrives from 192.168.1.42
-  → DeviceStore.FindDeviceByIP("192.168.1.42") → "Vivienne's iPad"
+DNS query arrives from 192.0.2.42
+  → DeviceStore.FindDeviceByIP("192.0.2.42") → "Vivienne's iPad"
   → Device.Category = "kids"  (or Device.Groups = ["kids", "family"])
   → Apply "kids" filtering policy (stricter blocklists, time restrictions)
 ```

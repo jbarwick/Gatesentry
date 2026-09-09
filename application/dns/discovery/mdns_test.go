@@ -54,7 +54,7 @@ func TestIsLinkLocalIPv6(t *testing.T) {
 		{"fd00::1", false},      // ULA — not link-local
 		{"2001:db8::1", false},  // Documentation range
 		{"::1", false},          // Loopback
-		{"192.168.1.1", false},  // IPv4
+		{"192.0.2.1", false},  // IPv4
 		{"", false},             // Empty
 		{"invalid", false},      // Garbage
 		{"fe80::", true},        // Minimal link-local
@@ -81,7 +81,7 @@ func TestProcessEntry_NewDevice(t *testing.T) {
 	entry := bonjour.NewServiceEntry("Vivienne's iPad", "_airplay._tcp", "local")
 	entry.HostName = "Viviennes-iPad.local."
 	entry.Port = 7000
-	entry.AddrIPv4 = net.ParseIP("192.168.1.42")
+	entry.AddrIPv4 = net.ParseIP("192.0.2.42")
 
 	browser.processEntry(entry)
 
@@ -89,12 +89,12 @@ func TestProcessEntry_NewDevice(t *testing.T) {
 		t.Fatalf("Expected 1 device, got %d", store.DeviceCount())
 	}
 
-	device := store.FindDeviceByIP("192.168.1.42")
+	device := store.FindDeviceByIP("192.0.2.42")
 	if device == nil {
 		t.Fatal("Expected to find device by IP")
 	}
-	if device.IPv4 != "192.168.1.42" {
-		t.Errorf("Expected IPv4 192.168.1.42, got %s", device.IPv4)
+	if device.IPv4 != "192.0.2.42" {
+		t.Errorf("Expected IPv4 192.0.2.42, got %s", device.IPv4)
 	}
 	if len(device.MDNSNames) == 0 || device.MDNSNames[0] != "Vivienne's iPad" {
 		t.Errorf("Expected MDNSNames[0] = %q, got %v", "Vivienne's iPad", device.MDNSNames)
@@ -122,8 +122,8 @@ func TestProcessEntry_NewDevice(t *testing.T) {
 	if len(records) == 0 {
 		t.Error("Expected A record for viviennes-ipad.local")
 	}
-	if len(records) > 0 && records[0].Value != "192.168.1.42" {
-		t.Errorf("Expected A record value 192.168.1.42, got %s", records[0].Value)
+	if len(records) > 0 && records[0].Value != "192.0.2.42" {
+		t.Errorf("Expected A record value 192.0.2.42, got %s", records[0].Value)
 	}
 }
 
@@ -132,12 +132,12 @@ func TestProcessEntry_EnrichPassiveDevice(t *testing.T) {
 	browser := NewMDNSBrowser(store, time.Minute)
 
 	// Phase 2: passive discovery creates a device (just IP, no name)
-	store.ObservePassiveQuery("192.168.1.42")
+	store.ObservePassiveQuery("192.0.2.42")
 	if store.DeviceCount() != 1 {
 		t.Fatalf("Expected 1 passive device, got %d", store.DeviceCount())
 	}
 
-	passiveDevice := store.FindDeviceByIP("192.168.1.42")
+	passiveDevice := store.FindDeviceByIP("192.0.2.42")
 	if passiveDevice == nil {
 		t.Fatal("Expected passive device to exist")
 	}
@@ -152,7 +152,7 @@ func TestProcessEntry_EnrichPassiveDevice(t *testing.T) {
 	entry := bonjour.NewServiceEntry("Vivienne's iPad", "_airplay._tcp", "local")
 	entry.HostName = "Viviennes-iPad.local."
 	entry.Port = 7000
-	entry.AddrIPv4 = net.ParseIP("192.168.1.42")
+	entry.AddrIPv4 = net.ParseIP("192.0.2.42")
 
 	browser.processEntry(entry)
 
@@ -161,7 +161,7 @@ func TestProcessEntry_EnrichPassiveDevice(t *testing.T) {
 		t.Fatalf("Expected 1 device after enrichment, got %d", store.DeviceCount())
 	}
 
-	device := store.FindDeviceByIP("192.168.1.42")
+	device := store.FindDeviceByIP("192.0.2.42")
 	if device == nil {
 		t.Fatal("Expected to find enriched device")
 	}
@@ -206,17 +206,17 @@ func TestProcessEntry_MultipleServiceTypes(t *testing.T) {
 	// Same device discovered via AirPlay
 	entry1 := bonjour.NewServiceEntry("Apple TV", "_airplay._tcp", "local")
 	entry1.HostName = "Apple-TV.local."
-	entry1.AddrIPv4 = net.ParseIP("192.168.1.50")
+	entry1.AddrIPv4 = net.ParseIP("192.0.2.50")
 
 	// Same device discovered via RAOP (same IP)
 	entry2 := bonjour.NewServiceEntry("Apple TV", "_raop._tcp", "local")
 	entry2.HostName = "Apple-TV.local."
-	entry2.AddrIPv4 = net.ParseIP("192.168.1.50")
+	entry2.AddrIPv4 = net.ParseIP("192.0.2.50")
 
 	// Same device discovered via Companion Link
 	entry3 := bonjour.NewServiceEntry("Apple TV", "_companion-link._tcp", "local")
 	entry3.HostName = "Apple-TV.local."
-	entry3.AddrIPv4 = net.ParseIP("192.168.1.50")
+	entry3.AddrIPv4 = net.ParseIP("192.0.2.50")
 
 	browser.processEntry(entry1)
 	browser.processEntry(entry2)
@@ -227,12 +227,93 @@ func TestProcessEntry_MultipleServiceTypes(t *testing.T) {
 		t.Fatalf("Expected 1 device for same IP, got %d", store.DeviceCount())
 	}
 
-	device := store.FindDeviceByIP("192.168.1.50")
+	device := store.FindDeviceByIP("192.0.2.50")
 	if device == nil {
 		t.Fatal("Expected to find device")
 	}
 	if device.DNSName != "apple-tv" {
 		t.Errorf("Expected DNSName 'apple-tv', got %q", device.DNSName)
+	}
+}
+
+func TestProcessEntry_DoesNotFuseTwoNamedDevices(t *testing.T) {
+	store := NewDeviceStore("local")
+	browser := NewMDNSBrowser(store, time.Minute)
+
+	store.UpsertDevice(&Device{
+		Hostnames: []string{"alpha"},
+		IPv4:      "192.0.2.10",
+		Source:    SourceDDNS,
+	})
+	store.UpsertDevice(&Device{
+		Hostnames: []string{"bravo"},
+		IPv4:      "192.0.2.20",
+		Source:    SourceDDNS,
+	})
+
+	// mDNS claims alpha's hostname lives at bravo's IP
+	entry := bonjour.NewServiceEntry("Alpha", "_http._tcp", "local")
+	entry.HostName = "alpha.local."
+	entry.AddrIPv4 = net.ParseIP("192.0.2.20")
+	browser.processEntry(entry)
+
+	if store.DeviceCount() != 2 {
+		t.Fatalf("device count = %d, want 2", store.DeviceCount())
+	}
+	a := store.FindDeviceByIP("192.0.2.10")
+	b := store.FindDeviceByIP("192.0.2.20")
+	if a == nil || b == nil {
+		t.Fatal("expected both devices to keep their IPs")
+	}
+	if !a.HasHostnameKey("alpha") || a.HasHostnameKey("bravo") {
+		t.Errorf("alpha names = %v", a.Hostnames)
+	}
+	if !b.HasHostnameKey("bravo") || b.HasHostnameKey("alpha") {
+		t.Errorf("bravo names = %v mdns=%v", b.Hostnames, b.MDNSNames)
+	}
+}
+
+func TestProcessEntry_StillEnrichesUnnamedIP(t *testing.T) {
+	store := NewDeviceStore("local")
+	browser := NewMDNSBrowser(store, time.Minute)
+	store.ObservePassiveQuery("192.0.2.42")
+
+	entry := bonjour.NewServiceEntry("Printer", "_ipp._tcp", "local")
+	entry.HostName = "printer.local."
+	entry.AddrIPv4 = net.ParseIP("192.0.2.42")
+	browser.processEntry(entry)
+
+	d := store.FindDeviceByIP("192.0.2.42")
+	if d == nil || !d.HasHostnameKey("printer") {
+		t.Fatalf("expected unnamed IP to gain hostname, got %+v", d)
+	}
+}
+
+func TestReclaimStolenNames(t *testing.T) {
+	store := NewDeviceStore("local")
+	nas := store.UpsertDevice(&Device{
+		Hostnames: []string{"nas"},
+		IPv4:      "192.0.2.1",
+		Source:    SourceMDNS,
+	})
+	pc := store.UpsertDevice(&Device{
+		Hostnames: []string{"nas.local", "pc"},
+		IPv4:      "192.0.2.50",
+		Source:    SourceMDNS,
+	})
+
+	got := store.GetDevice(pc)
+	if got.HasHostnameKey("nas") {
+		t.Errorf("pc still has nas alias: %v", got.Hostnames)
+	}
+	if !got.HasHostnameKey("pc") {
+		t.Errorf("pc lost its own name: %v", got.Hostnames)
+	}
+	if got.DNSName != "pc" {
+		t.Errorf("DNSName = %q, want pc", got.DNSName)
+	}
+	if store.GetDevice(nas).DNSName != "nas" {
+		t.Errorf("nas DNSName = %q", store.GetDevice(nas).DNSName)
 	}
 }
 
@@ -299,17 +380,17 @@ func TestProcessEntry_BothIPv4AndIPv6(t *testing.T) {
 
 	entry := bonjour.NewServiceEntry("Mac Mini", "_http._tcp", "local")
 	entry.HostName = "macmini.local."
-	entry.AddrIPv4 = net.ParseIP("192.168.1.100")
+	entry.AddrIPv4 = net.ParseIP("192.0.2.100")
 	entry.AddrIPv6 = net.ParseIP("fd00::24a")
 
 	browser.processEntry(entry)
 
-	device := store.FindDeviceByIP("192.168.1.100")
+	device := store.FindDeviceByIP("192.0.2.100")
 	if device == nil {
 		t.Fatal("Expected to find device")
 	}
-	if device.IPv4 != "192.168.1.100" {
-		t.Errorf("Expected IPv4 192.168.1.100, got %s", device.IPv4)
+	if device.IPv4 != "192.0.2.100" {
+		t.Errorf("Expected IPv4 192.0.2.100, got %s", device.IPv4)
 	}
 	if device.IPv6 != "fd00::24a" {
 		t.Errorf("Expected IPv6 fd00::24a, got %s", device.IPv6)
@@ -326,7 +407,7 @@ func TestProcessEntry_BothIPv4AndIPv6(t *testing.T) {
 	}
 
 	// Should also have PTR records
-	ptrRecords := store.LookupReverse("100.1.168.192.in-addr.arpa")
+	ptrRecords := store.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(ptrRecords) == 0 {
 		t.Error("Expected PTR record for IPv4 reverse")
 	}
@@ -339,7 +420,7 @@ func TestProcessEntry_PreservesExistingIPv4(t *testing.T) {
 	// Create a device with IPv4 and hostname (e.g., from prior discovery)
 	device := &Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourcePassive,
 		Sources:   []DiscoverySource{SourcePassive},
 	}
@@ -350,8 +431,8 @@ func TestProcessEntry_PreservesExistingIPv4(t *testing.T) {
 	if found == nil {
 		t.Fatal("Expected to find device by hostname")
 	}
-	if found.IPv4 != "192.168.1.100" {
-		t.Fatalf("Expected initial IPv4 192.168.1.100, got %s", found.IPv4)
+	if found.IPv4 != "192.0.2.100" {
+		t.Fatalf("Expected initial IPv4 192.0.2.100, got %s", found.IPv4)
 	}
 
 	// mDNS discovers same device with only IPv6 (no IPv4 in this entry)
@@ -367,8 +448,8 @@ func TestProcessEntry_PreservesExistingIPv4(t *testing.T) {
 	if found == nil {
 		t.Fatal("Expected to find enriched device")
 	}
-	if found.IPv4 != "192.168.1.100" {
-		t.Errorf("Expected IPv4 preserved as 192.168.1.100, got %s", found.IPv4)
+	if found.IPv4 != "192.0.2.100" {
+		t.Errorf("Expected IPv4 preserved as 192.0.2.100, got %s", found.IPv4)
 	}
 	if found.IPv6 != "fd00::24a" {
 		t.Errorf("Expected IPv6 fd00::24a, got %s", found.IPv6)
@@ -382,7 +463,7 @@ func TestProcessEntry_PrefersGUAOverLinkLocal(t *testing.T) {
 	// Device already discovered with a GUA IPv6 (e.g., from DDNS)
 	device := &Device{
 		Hostnames: []string{"server"},
-		IPv4:      "192.168.1.200",
+		IPv4:      "192.0.2.200",
 		IPv6:      "2001:db8::1",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
@@ -392,7 +473,7 @@ func TestProcessEntry_PrefersGUAOverLinkLocal(t *testing.T) {
 	// mDNS finds same device but only reports link-local IPv6
 	entry := bonjour.NewServiceEntry("Server", "_http._tcp", "local")
 	entry.HostName = "server.local."
-	entry.AddrIPv4 = net.ParseIP("192.168.1.200")
+	entry.AddrIPv4 = net.ParseIP("192.0.2.200")
 	entry.AddrIPv6 = net.ParseIP("fe80::1234")
 
 	browser.processEntry(entry)
@@ -460,7 +541,7 @@ func TestProcessEntry_MatchByHostname(t *testing.T) {
 	// First service type discovers device
 	entry1 := bonjour.NewServiceEntry("NAS", "_smb._tcp", "local")
 	entry1.HostName = "mynas.local."
-	entry1.AddrIPv4 = net.ParseIP("192.168.1.150")
+	entry1.AddrIPv4 = net.ParseIP("192.0.2.150")
 
 	browser.processEntry(entry1)
 
@@ -468,7 +549,7 @@ func TestProcessEntry_MatchByHostname(t *testing.T) {
 	// (device got a new DHCP lease between scans — unlikely within one scan but tests the logic)
 	entry2 := bonjour.NewServiceEntry("NAS", "_http._tcp", "local")
 	entry2.HostName = "mynas.local."
-	entry2.AddrIPv4 = net.ParseIP("192.168.1.151")
+	entry2.AddrIPv4 = net.ParseIP("192.0.2.151")
 
 	browser.processEntry(entry2)
 
@@ -482,8 +563,8 @@ func TestProcessEntry_MatchByHostname(t *testing.T) {
 		t.Fatal("Expected to find device")
 	}
 	// IP should be updated to the latest
-	if device.IPv4 != "192.168.1.151" {
-		t.Errorf("Expected IPv4 updated to 192.168.1.151, got %s", device.IPv4)
+	if device.IPv4 != "192.0.2.151" {
+		t.Errorf("Expected IPv4 updated to 192.0.2.151, got %s", device.IPv4)
 	}
 }
 

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v2.0.0-beta.5 (9 September 2026)
+
+- Device names: do not fuse two named devices when mDNS/DDNS mixes a name with another host's address
+- Extra hostnames and mDNS aliases expire (7-day TTL); unstamped legacy aliases drop on load
+- IPs are runtime values only — no site LAN in product defaults, UI samples, or tests (192.0.2.0/24, 2001:db8::/32)
+- Default IPv6 resolver is empty; `run.sh` / `restart.sh` no longer force a site recursive DNS
+
 ## v2.0.0-beta.4 (9 September 2026)
 
 - Devices list: query tag is last DNS request the device sent to GateSentry (`No queries` / `Queried …`), not a missing DNS record
@@ -19,7 +26,7 @@
 ## v2.0.0-beta.2 (2 September 2026)
 
 - Dual-stack DNS listen (`0.0.0.0` plus `::`); AAAA answers for appliance/WPAD/blocked names
-- Separate IPv6 upstream resolver (`dns_resolver_ipv6`, default `[fd00:1234:5678::1]:53`); AAAA/HTTPS/ip6.arpa use it
+- Separate IPv6 upstream resolver (`dns_resolver_ipv6`, default `[2001:db8::1]:53`); AAAA/HTTPS/ip6.arpa use it
 - Generate fallback blocked image when `blocked.jpg` is missing
 - Bonjour advertises using the LAN IPv4 instead of hostname lookup
 - Timezone follows container `TZ` (Asia/Singapore on monster-jj)

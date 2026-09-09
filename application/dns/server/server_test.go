@@ -95,7 +95,7 @@ func setupTestServer(t *testing.T) func() {
 // --- isReverseDomain tests ---
 
 func TestIsReverseDomain_IPv4(t *testing.T) {
-	if !isReverseDomain("100.1.168.192.in-addr.arpa") {
+	if !isReverseDomain("100.2.0.192.in-addr.arpa") {
 		t.Error("Expected in-addr.arpa to be reverse domain")
 	}
 }
@@ -124,7 +124,7 @@ func TestHandleDNS_DeviceStoreA(t *testing.T) {
 	// Add a device to the store
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    discovery.SourceManual,
 		Sources:   []discovery.DiscoverySource{discovery.SourceManual},
 	})
@@ -133,7 +133,7 @@ func TestHandleDNS_DeviceStoreA(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("macmini.local.", dns.TypeA)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -146,8 +146,8 @@ func TestHandleDNS_DeviceStoreA(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected A record, got %T", w.msg.Answer[0])
 	}
-	if a.A.String() != "192.168.1.100" {
-		t.Errorf("Expected A record 192.168.1.100, got %s", a.A.String())
+	if a.A.String() != "192.0.2.100" {
+		t.Errorf("Expected A record 192.0.2.100, got %s", a.A.String())
 	}
 }
 
@@ -165,7 +165,7 @@ func TestHandleDNS_DeviceStoreAAAA(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("server.local.", dns.TypeAAAA)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -189,16 +189,16 @@ func TestHandleDNS_DeviceStorePTR(t *testing.T) {
 
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    discovery.SourceManual,
 		Sources:   []discovery.DiscoverySource{discovery.SourceManual},
 	})
 
 	// PTR query for reverse lookup
 	req := new(dns.Msg)
-	req.SetQuestion("100.1.168.192.in-addr.arpa.", dns.TypePTR)
+	req.SetQuestion("100.2.0.192.in-addr.arpa.", dns.TypePTR)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -223,7 +223,7 @@ func TestHandleDNS_DeviceStoreNoMatchFallsThrough(t *testing.T) {
 	// Device store has a device, but we query for a different name
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    discovery.SourceManual,
 	})
 
@@ -233,7 +233,7 @@ func TestHandleDNS_DeviceStoreNoMatchFallsThrough(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("oldserver.local.", dns.TypeA)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -260,7 +260,7 @@ func TestHandleDNS_BlockedDomain(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("malware.example.com.", dns.TypeA)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -290,7 +290,7 @@ func TestHandleDNS_DeviceStorePriority(t *testing.T) {
 	// Same name in both device store and legacy internal records
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"myserver"},
-		IPv4:      "192.168.1.200",
+		IPv4:      "192.0.2.200",
 		Source:    discovery.SourceDDNS,
 		Sources:   []discovery.DiscoverySource{discovery.SourceDDNS},
 	})
@@ -299,7 +299,7 @@ func TestHandleDNS_DeviceStorePriority(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("myserver.local.", dns.TypeA)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -313,8 +313,8 @@ func TestHandleDNS_DeviceStorePriority(t *testing.T) {
 		t.Fatalf("Expected A record, got %T", w.msg.Answer[0])
 	}
 	// Device store should take priority over legacy internal records
-	if a.A.String() != "192.168.1.200" {
-		t.Errorf("Expected device store IP 192.168.1.200, got %s (device store should take priority)", a.A.String())
+	if a.A.String() != "192.0.2.200" {
+		t.Errorf("Expected device store IP 192.0.2.200, got %s (device store should take priority)", a.A.String())
 	}
 }
 
@@ -327,7 +327,7 @@ func TestHandleDNS_ServerNotRunning(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("macmini.local.", dns.TypeA)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	// Server not running should close the connection, not respond
@@ -346,7 +346,7 @@ func TestHandleDNS_DualStack(t *testing.T) {
 	// Device with both IPv4 and IPv6
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"dualstack"},
-		IPv4:      "192.168.1.42",
+		IPv4:      "192.0.2.42",
 		IPv6:      "fd00::42",
 		Source:    discovery.SourceLease,
 		Sources:   []discovery.DiscoverySource{discovery.SourceLease},
@@ -355,7 +355,7 @@ func TestHandleDNS_DualStack(t *testing.T) {
 	// Query A → should get IPv4 only
 	req := new(dns.Msg)
 	req.SetQuestion("dualstack.local.", dns.TypeA)
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil || len(w.msg.Answer) != 1 {
@@ -368,7 +368,7 @@ func TestHandleDNS_DualStack(t *testing.T) {
 	// Query AAAA → should get IPv6 only
 	req2 := new(dns.Msg)
 	req2.SetQuestion("dualstack.local.", dns.TypeAAAA)
-	w2 := newMockResponseWriter("192.168.1.50")
+	w2 := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w2, req2)
 
 	if w2.msg == nil || len(w2.msg.Answer) != 1 {
@@ -385,7 +385,7 @@ func TestHandleDNS_BareHostname(t *testing.T) {
 
 	deviceStore.UpsertDevice(&discovery.Device{
 		Hostnames: []string{"printer"},
-		IPv4:      "192.168.1.55",
+		IPv4:      "192.0.2.55",
 		Source:    discovery.SourceMDNS,
 		Sources:   []discovery.DiscoverySource{discovery.SourceMDNS},
 	})
@@ -393,7 +393,7 @@ func TestHandleDNS_BareHostname(t *testing.T) {
 	// Query bare hostname without zone suffix
 	req := new(dns.Msg)
 	req.SetQuestion("printer.", dns.TypeA)
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -407,8 +407,8 @@ func TestHandleDNS_BareHostname(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected A record, got %T", w.msg.Answer[0])
 	}
-	if a.A.String() != "192.168.1.55" {
-		t.Errorf("Expected 192.168.1.55, got %s", a.A.String())
+	if a.A.String() != "192.0.2.55" {
+		t.Errorf("Expected 192.0.2.55, got %s", a.A.String())
 	}
 }
 
@@ -439,7 +439,7 @@ func TestHandleDNS_BlockedViaDomainListManager(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("badsite.example.com.", dns.TypeA)
 
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 
 	if w.msg == nil {
@@ -514,7 +514,7 @@ func TestEmptyQuestionDoesNotPanic(t *testing.T) {
 
 	req := new(dns.Msg)
 	req.SetQuestion(".", dns.TypeA)
-	w := newMockResponseWriter("192.168.1.50")
+	w := newMockResponseWriter("192.0.2.50")
 	handleDNSRequest(w, req)
 }
 
@@ -536,24 +536,24 @@ func TestUpstreamCircuitOpensAfterFailures(t *testing.T) {
 
 func TestResolverForMsgUsesIPv6UpstreamForAAAA(t *testing.T) {
 	ResetUpstreamCircuit()
-	SetExternalResolver("192.168.1.1:53")
-	SetExternalResolverIPv6("[fd00:1234:5678::1]:53")
+	SetExternalResolver("192.0.2.1:53")
+	SetExternalResolverIPv6("[2001:db8::1]:53")
 
 	aaaa := new(dns.Msg)
 	aaaa.SetQuestion("example.com.", dns.TypeAAAA)
-	if got := resolverForMsg(aaaa); got != "[fd00:1234:5678::1]:53" {
+	if got := resolverForMsg(aaaa); got != "[2001:db8::1]:53" {
 		t.Fatalf("AAAA resolver = %q", got)
 	}
 
 	a := new(dns.Msg)
 	a.SetQuestion("example.com.", dns.TypeA)
-	if got := resolverForMsg(a); got != "192.168.1.1:53" {
+	if got := resolverForMsg(a); got != "192.0.2.1:53" {
 		t.Fatalf("A resolver = %q", got)
 	}
 
 	ptr := new(dns.Msg)
 	ptr.SetQuestion("1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.7.6.5.4.3.2.1.ip6.arpa.", dns.TypePTR)
-	if got := resolverForMsg(ptr); got != "[fd00:1234:5678::1]:53" {
+	if got := resolverForMsg(ptr); got != "[2001:db8::1]:53" {
 		t.Fatalf("ip6.arpa PTR resolver = %q", got)
 	}
 }

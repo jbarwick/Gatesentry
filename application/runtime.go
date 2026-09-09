@@ -242,7 +242,7 @@ func (R *GSRuntime) Init() {
 		log.Printf("[DNS] Using IPv6 resolver from environment (overrides settings): %s", dnsResolver6)
 		R.GSSettings.Update("dns_resolver_ipv6", dnsResolver6)
 	} else {
-		R.GSSettings.SetDefault("dns_resolver_ipv6", "[fd00:1234:5678::1]:53")
+		R.GSSettings.SetDefault("dns_resolver_ipv6", "")
 	}
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")

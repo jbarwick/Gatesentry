@@ -94,7 +94,7 @@ RUN_SECTION=""
 HTTP_ECHO_PORT=19080
 HTTPS_ECHO_PORT=19443
 ECHO_DOMAIN=httpbin.org
-ECHO_IPV6_ADDR=fd00:1234:5678::1023
+ECHO_IPV6_ADDR="${ECHO_IPV6_ADDR:-}"
 
 # Auth token
 TOKEN=""
@@ -463,7 +463,7 @@ start_gatesentry_server() {
         unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY 2>/dev/null || true
         export GATESENTRY_DNS_ADDR="${GATESENTRY_DNS_ADDR:-0.0.0.0}"
         export GATESENTRY_DNS_PORT="${GATESENTRY_DNS_PORT:-10053}"
-        export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.168.1.1:53}"
+        export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.0.2.1:53}"
         export GS_ADMIN_PORT="${ADMIN_PORT}"
         export GS_MAX_SCAN_SIZE_MB="${GS_MAX_SCAN_SIZE_MB:-2}"
         exec ./gatesentrybin > "$GATESENTRY_LOG" 2>&1
@@ -569,7 +569,7 @@ restart_original_server() {
         print_info "Restarting original GateSentry server..."
         (
             cd "$PROJECT_DIR/bin"
-            export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.168.1.1:53}"
+            export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.0.2.1:53}"
             export GS_ADMIN_PORT="${GS_ADMIN_PORT:-8080}"
             export GS_MAX_SCAN_SIZE_MB="${GS_MAX_SCAN_SIZE_MB:-2}"
             ./gatesentrybin > "$PROJECT_DIR/log.txt" 2>&1 &

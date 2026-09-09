@@ -6,7 +6,7 @@ Legend: `[ ]` not started · `[x]` done
 
 ## Phase 0 — Recover monster-jj (ops)
 
-- [x] Leave `dns_resolver` at `192.168.1.1:53` (upstream is back; do not set `GATESENTRY_DNS_RESOLVER`)
+- [x] Leave `dns_resolver` at `192.0.2.1:53` (upstream is back; do not set `GATESENTRY_DNS_RESOLVER`)
 - [x] Rotate `log.db` aside (`log.db.bak-20260902-131403`, 129MB)
 - [x] Start container (`docker-compose -f /volume1/docker/Gatesentry/docker-compose.yml up -d`)
 - [x] Verify admin: `http://monster-jj:9876/` → 302 `/gatesentry/` → 200
@@ -73,7 +73,7 @@ Legend: `[ ]` not started · `[x]` done
 - [x] Bonjour RegisterProxy with LAN IP
 - [x] Timezone from `TZ` env; drop per-request timezone log
 - [x] Dual-stack DNS listen; AAAA for self/WPAD/block
-- [x] IPv6 upstream setting `dns_resolver_ipv6` (default `fd00:1234:5678::1`); AAAA uses it
+- [x] IPv6 upstream setting `dns_resolver_ipv6` (default `2001:db8::1`); AAAA uses it
 - [x] Quiet IPv6 no-route proxy logs
 - [x] Build/publish/deploy `2.0.0-beta.2`
 - [x] Advertise all five NICs (91–95) on appliance A/AAAA records

@@ -165,7 +165,7 @@ This PR delivers DNS cache performance improvements, comprehensive test coverage
 - New CORS middleware echoes `Origin` header
 - Allows access from multiple device hostnames
 - Required for accessing GateSentry from different addresses
-  (e.g., `monster-jj`, `monster-jj.local`, `192.168.1.x`, etc.)
+  (e.g., `monster-jj`, `monster-jj.local`, `192.0.2.x`, etc.)
 - Handles preflight `OPTIONS` requests
 
 **Files Changed:**

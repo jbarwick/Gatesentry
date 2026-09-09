@@ -35,7 +35,7 @@ func SanitizeDNSName(name string) string {
 }
 
 // reverseIPv4 converts an IPv4 address to its in-addr.arpa PTR name.
-// Example: "192.168.1.100" → "100.1.168.192.in-addr.arpa"
+// Example: "192.0.2.100" → "100.2.0.192.in-addr.arpa"
 func reverseIPv4(ip string) string {
 	parts := strings.Split(ip, ".")
 	if len(parts) != 4 {
@@ -46,7 +46,7 @@ func reverseIPv4(ip string) string {
 }
 
 // reverseIPv6 converts an IPv6 address to its ip6.arpa PTR name.
-// Example: "fd00:1234:5678::24a" → "a.4.2.0.0.0.0.0...ip6.arpa"
+// Example: "2001:db8::24a" → "a.4.2.0.0.0.0.0...ip6.arpa"
 func reverseIPv6(ipStr string) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
@@ -87,7 +87,7 @@ type DeviceStore struct {
 	recordsByName map[string][]DnsRecord
 
 	// recordsByReverse maps reverse PTR name → []DnsRecord.
-	// Example key: "100.1.168.192.in-addr.arpa"
+	// Example key: "100.2.0.192.in-addr.arpa"
 	recordsByReverse map[string][]DnsRecord
 
 	// deviceByHostname maps lowercase hostname → device ID for matching.
@@ -243,7 +243,7 @@ func (ds *DeviceStore) LookupName(fqdn string, qtype uint16) []DnsRecord {
 }
 
 // LookupReverse returns PTR records for a reverse DNS name.
-// Example: LookupReverse("100.1.168.192.in-addr.arpa")
+// Example: LookupReverse("100.2.0.192.in-addr.arpa")
 func (ds *DeviceStore) LookupReverse(reverseName string) []DnsRecord {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
@@ -313,6 +313,9 @@ func (ds *DeviceStore) FindDeviceByHostname(hostname string) *Device {
 	defer ds.mu.RUnlock()
 	id := ds.deviceByHostname[strings.ToLower(hostname)]
 	if id == "" {
+		id = ds.deviceByHostname[hostnameKey(hostname)]
+	}
+	if id == "" {
 		return nil
 	}
 	d := ds.devices[id]
@@ -381,6 +384,8 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 	ds.evictConflictingIP(device.ID, device.IPv4, device.IPv6)
 
 	now := time.Now()
+	observedHosts := append([]string(nil), device.Hostnames...)
+	observedMDNS := append([]string(nil), device.MDNSNames...)
 	existing := ds.devices[device.ID]
 	if existing != nil {
 		// Merge: preserve fields the caller didn't set
@@ -400,10 +405,10 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 		for _, s := range existing.Sources {
 			device.AddSource(s)
 		}
-		// Merge hostnames (deduplicate)
-		device.Hostnames = mergeStringSlice(device.Hostnames, existing.Hostnames)
-		device.MDNSNames = mergeStringSlice(device.MDNSNames, existing.MDNSNames)
-		device.MACs = mergeStringSlice(device.MACs, existing.MACs)
+		// Keep existing names first so a later mDNS alias cannot become the title.
+		device.Hostnames = mergeStringSlice(existing.Hostnames, device.Hostnames)
+		device.MDNSNames = mergeStringSlice(existing.MDNSNames, device.MDNSNames)
+		device.MACs = mergeStringSlice(existing.MACs, device.MACs)
 
 		// Preserve existing IP addresses when new values are empty.
 		// This prevents discovery sources that lack IP info from wiping
@@ -437,6 +442,7 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 		device.Online = false
 	}
 	device.LastSeen = now
+	ds.stampObservedNames(device, existing, observedHosts, observedMDNS, now)
 
 	// Derive DNS name if not set
 	if device.DNSName == "" {
@@ -668,6 +674,9 @@ func (ds *DeviceStore) evictConflictingIP(keepID string, ipv4, ipv6 string) {
 }
 
 func (ds *DeviceStore) rebuildIndexes() {
+	ds.reclaimStolenNames()
+	ds.expireStaleNames(time.Now())
+
 	// Clear indexes
 	ds.recordsByName = make(map[string][]DnsRecord)
 	ds.recordsByReverse = make(map[string][]DnsRecord)
@@ -676,16 +685,23 @@ func (ds *DeviceStore) rebuildIndexes() {
 	ds.deviceByIP = make(map[string]string)
 
 	for _, device := range ds.devices {
-		// Index by hostnames
-		for _, h := range device.Hostnames {
+		// Index by hostnames (raw and normalized so "host.local" matches "host")
+		indexHost := func(h string) {
+			if h == "" {
+				return
+			}
 			ds.deviceByHostname[strings.ToLower(h)] = device.ID
+			if k := hostnameKey(h); k != "" {
+				ds.deviceByHostname[k] = device.ID
+			}
+		}
+		for _, h := range device.Hostnames {
+			indexHost(h)
 		}
 		for _, m := range device.MDNSNames {
-			ds.deviceByHostname[strings.ToLower(m)] = device.ID
+			indexHost(m)
 		}
-		if device.DNSName != "" {
-			ds.deviceByHostname[device.DNSName] = device.ID
-		}
+		indexHost(device.DNSName)
 
 		// Index by MACs
 		for _, mac := range device.MACs {
@@ -797,6 +813,127 @@ func (ds *DeviceStore) rebuildIndexes() {
 
 // mergeStringSlice merges two slices, deduplicating (case-insensitive).
 // Items from 'a' take precedence in ordering.
+func (ds *DeviceStore) stampObservedNames(device, existing *Device, hosts, mdns []string, now time.Time) {
+	seenH := map[string]time.Time{}
+	seenM := map[string]time.Time{}
+	if existing != nil {
+		for k, t := range existing.HostnameSeen {
+			seenH[k] = t
+		}
+		for k, t := range existing.MDNSNameSeen {
+			seenM[k] = t
+		}
+	}
+	for _, h := range hosts {
+		if k := hostnameKey(h); k != "" {
+			seenH[k] = now
+		}
+	}
+	for _, m := range mdns {
+		if k := hostnameKey(m); k != "" {
+			seenM[k] = now
+		}
+	}
+	device.HostnameSeen = seenH
+	device.MDNSNameSeen = seenM
+}
+
+// reclaimStolenNames enforces one hostname → one device. The owner is the
+// device whose DNS name or primary hostname matches the key; other devices
+// drop that alias.
+func (ds *DeviceStore) reclaimStolenNames() {
+	owner := map[string]string{}
+	for _, d := range ds.devices {
+		keys := []string{d.DNSName}
+		if len(d.Hostnames) > 0 {
+			keys = append(keys, d.Hostnames[0])
+		}
+		for _, k := range keys {
+			nk := hostnameKey(k)
+			if nk == "" {
+				continue
+			}
+			if _, exists := owner[nk]; !exists {
+				owner[nk] = d.ID
+			}
+		}
+	}
+	for _, d := range ds.devices {
+		d.Hostnames = filterNamesNotOwnedByOthers(d.Hostnames, d.ID, owner)
+		d.MDNSNames = filterNamesNotOwnedByOthers(d.MDNSNames, d.ID, owner)
+		ds.refreshDerivedNames(d)
+	}
+}
+
+func filterNamesNotOwnedByOthers(names []string, id string, owner map[string]string) []string {
+	out := names[:0:0]
+	for _, n := range names {
+		k := hostnameKey(n)
+		if k != "" && owner[k] != "" && owner[k] != id {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// expireStaleNames drops extra hostnames and mDNS aliases that have not been
+// observed within NameTTL. Unstamped extras (legacy persist) expire immediately.
+// The primary hostname (Hostnames[0]) is kept as identity.
+func (ds *DeviceStore) expireStaleNames(now time.Time) {
+	for _, d := range ds.devices {
+		if len(d.Hostnames) > 1 {
+			kept := d.Hostnames[:1]
+			for _, h := range d.Hostnames[1:] {
+				k := hostnameKey(h)
+				seen := d.HostnameSeen[k]
+				if !seen.IsZero() && now.Sub(seen) < NameTTL {
+					kept = append(kept, h)
+				}
+			}
+			d.Hostnames = kept
+		}
+		keptMDNS := d.MDNSNames[:0:0]
+		for _, m := range d.MDNSNames {
+			k := hostnameKey(m)
+			seen := d.MDNSNameSeen[k]
+			if !seen.IsZero() && now.Sub(seen) < NameTTL {
+				keptMDNS = append(keptMDNS, m)
+			}
+		}
+		d.MDNSNames = keptMDNS
+		ds.refreshDerivedNames(d)
+	}
+}
+
+func (ds *DeviceStore) refreshDerivedNames(d *Device) {
+	if !dnsNameMatchesNames(d) {
+		d.DNSName = ds.deriveDNSName(d)
+	}
+	d.DisplayName = d.GetDisplayName()
+}
+
+func dnsNameMatchesNames(d *Device) bool {
+	if d.DNSName == "" {
+		return false
+	}
+	k := hostnameKey(d.DNSName)
+	if hostnameKey(d.ManualName) == k {
+		return true
+	}
+	for _, h := range d.Hostnames {
+		if hostnameKey(h) == k {
+			return true
+		}
+	}
+	for _, m := range d.MDNSNames {
+		if hostnameKey(m) == k {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeStringSlice(a, b []string) []string {
 	seen := make(map[string]bool)
 	var result []string

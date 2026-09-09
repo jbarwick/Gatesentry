@@ -297,7 +297,7 @@
         <div class="wpad-input-host">
           <TextInput
             labelText={$_("Proxy Host / IP")}
-            placeholder="192.168.1.100"
+            placeholder="192.0.2.10"
             bind:value={proxyHost}
             helperText={$_(
               "The LAN IP or hostname clients will use to reach the proxy",

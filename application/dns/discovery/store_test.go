@@ -54,7 +54,7 @@ func TestReverseIPv4(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"192.168.1.100", "100.1.168.192.in-addr.arpa"},
+		{"192.0.2.100", "100.2.0.192.in-addr.arpa"},
 		{"10.0.0.1", "1.0.0.10.in-addr.arpa"},
 		{"invalid", ""},
 		{"", ""},
@@ -72,14 +72,14 @@ func TestReverseIPv4(t *testing.T) {
 // --- reverseIPv6 tests ---
 
 func TestReverseIPv6(t *testing.T) {
-	result := reverseIPv6("fd00:1234:5678::24a")
+	result := reverseIPv6("2001:db8::24a")
 	if result == "" {
 		t.Fatal("reverseIPv6 returned empty for valid IPv6")
 	}
 	if !strings.HasSuffix(result, ".ip6.arpa") {
 		t.Errorf("reverseIPv6 should end with .ip6.arpa, got %q", result)
 	}
-	// fd00:1234:5678::24a expands to fd00:1234:5678:0000:0000:0000:0000:024a
+	// 2001:db8::24a expands to 2001:0db8:0000:0000:0000:0000:0000:024a
 	// last nibble reversed: a.4.2.0
 	if !strings.HasPrefix(result, "a.4.2.0.") {
 		t.Errorf("reverseIPv6 should start with a.4.2.0., got %q", result)
@@ -102,10 +102,10 @@ func TestDeviceGetDisplayName(t *testing.T) {
 		t.Errorf("Expected ManualName, got %q", d.GetDisplayName())
 	}
 
-	// DisplayName next
+	// DisplayName is a derived cache, not a source
 	d = &Device{DisplayName: "Display", Hostnames: []string{"host1"}}
-	if d.GetDisplayName() != "Display" {
-		t.Errorf("Expected DisplayName, got %q", d.GetDisplayName())
+	if d.GetDisplayName() != "host1" {
+		t.Errorf("Expected hostname over cached DisplayName, got %q", d.GetDisplayName())
 	}
 
 	// Hostname next
@@ -127,8 +127,8 @@ func TestDeviceGetDisplayName(t *testing.T) {
 	}
 
 	// IPv4 fallback
-	d = &Device{IPv4: "192.168.1.1"}
-	if d.GetDisplayName() != "Unknown (192.168.1.1)" {
+	d = &Device{IPv4: "192.0.2.1"}
+	if d.GetDisplayName() != "Unknown (192.0.2.1)" {
 		t.Errorf("Expected IPv4 fallback, got %q", d.GetDisplayName())
 	}
 
@@ -158,7 +158,7 @@ func TestDeviceAddSource(t *testing.T) {
 // --- DnsRecord.ToRR tests ---
 
 func TestDnsRecordToRR_A(t *testing.T) {
-	rec := DnsRecord{Name: "macmini.local", Type: dns.TypeA, Value: "192.168.1.100", TTL: 60}
+	rec := DnsRecord{Name: "macmini.local", Type: dns.TypeA, Value: "192.0.2.100", TTL: 60}
 	rr := rec.ToRR()
 	if rr == nil {
 		t.Fatal("ToRR returned nil")
@@ -167,8 +167,8 @@ func TestDnsRecordToRR_A(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected *dns.A")
 	}
-	if a.A.String() != "192.168.1.100" {
-		t.Errorf("Expected 192.168.1.100, got %s", a.A.String())
+	if a.A.String() != "192.0.2.100" {
+		t.Errorf("Expected 192.0.2.100, got %s", a.A.String())
 	}
 	if a.Hdr.Name != "macmini.local." {
 		t.Errorf("Expected macmini.local., got %s", a.Hdr.Name)
@@ -176,7 +176,7 @@ func TestDnsRecordToRR_A(t *testing.T) {
 }
 
 func TestDnsRecordToRR_AAAA(t *testing.T) {
-	rec := DnsRecord{Name: "macmini.local", Type: dns.TypeAAAA, Value: "fd00:1234:5678::24a", TTL: 60}
+	rec := DnsRecord{Name: "macmini.local", Type: dns.TypeAAAA, Value: "2001:db8::24a", TTL: 60}
 	rr := rec.ToRR()
 	if rr == nil {
 		t.Fatal("ToRR returned nil")
@@ -191,7 +191,7 @@ func TestDnsRecordToRR_AAAA(t *testing.T) {
 }
 
 func TestDnsRecordToRR_PTR(t *testing.T) {
-	rec := DnsRecord{Name: "100.1.168.192.in-addr.arpa", Type: dns.TypePTR, Value: "macmini.local", TTL: 60}
+	rec := DnsRecord{Name: "100.2.0.192.in-addr.arpa", Type: dns.TypePTR, Value: "macmini.local", TTL: 60}
 	rr := rec.ToRR()
 	if rr == nil {
 		t.Fatal("ToRR returned nil")
@@ -228,7 +228,7 @@ func TestUpsertDevice_NewDevice(t *testing.T) {
 	ds := NewDeviceStore("local")
 	device := &Device{
 		Hostnames: []string{"MacMini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -245,12 +245,12 @@ func TestUpsertDevice_NewDevice(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("Expected 1 A record, got %d", len(records))
 	}
-	if records[0].Value != "192.168.1.100" {
-		t.Errorf("Expected 192.168.1.100, got %s", records[0].Value)
+	if records[0].Value != "192.0.2.100" {
+		t.Errorf("Expected 192.0.2.100, got %s", records[0].Value)
 	}
 
 	// Should generate PTR record
-	ptrRecords := ds.LookupReverse("100.1.168.192.in-addr.arpa")
+	ptrRecords := ds.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(ptrRecords) != 1 {
 		t.Fatalf("Expected 1 PTR record, got %d", len(ptrRecords))
 	}
@@ -260,8 +260,8 @@ func TestUpsertDevice_WithIPv6(t *testing.T) {
 	ds := NewDeviceStore("local")
 	device := &Device{
 		Hostnames: []string{"MacMini"},
-		IPv4:      "192.168.1.100",
-		IPv6:      "fd00:1234:5678::24a",
+		IPv4:      "192.0.2.100",
+		IPv6:      "2001:db8::24a",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -278,16 +278,16 @@ func TestUpsertDevice_WithIPv6(t *testing.T) {
 	if len(aaaaRecords) != 1 {
 		t.Fatalf("Expected 1 AAAA record, got %d", len(aaaaRecords))
 	}
-	if aaaaRecords[0].Value != "fd00:1234:5678::24a" {
-		t.Errorf("Expected fd00:1234:5678::24a, got %s", aaaaRecords[0].Value)
+	if aaaaRecords[0].Value != "2001:db8::24a" {
+		t.Errorf("Expected 2001:db8::24a, got %s", aaaaRecords[0].Value)
 	}
 
 	// Both reverse PTR records
-	ipv4ptr := ds.LookupReverse("100.1.168.192.in-addr.arpa")
+	ipv4ptr := ds.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(ipv4ptr) != 1 {
 		t.Fatalf("Expected 1 IPv4 PTR record, got %d", len(ipv4ptr))
 	}
-	ipv6ptr := ds.LookupReverse(reverseIPv6("fd00:1234:5678::24a"))
+	ipv6ptr := ds.LookupReverse(reverseIPv6("2001:db8::24a"))
 	if len(ipv6ptr) != 1 {
 		t.Fatalf("Expected 1 IPv6 PTR record, got %d", len(ipv6ptr))
 	}
@@ -299,7 +299,7 @@ func TestUpsertDevice_MergeOnUpdate(t *testing.T) {
 	// First upsert — from passive discovery
 	device := &Device{
 		ID:      "dev-123",
-		IPv4:    "192.168.1.42",
+		IPv4:    "192.0.2.42",
 		MACs:    []string{"aa:bb:cc:dd:ee:ff"},
 		Source:  SourcePassive,
 		Sources: []DiscoverySource{SourcePassive},
@@ -310,7 +310,7 @@ func TestUpsertDevice_MergeOnUpdate(t *testing.T) {
 	update := &Device{
 		ID:        "dev-123",
 		Hostnames: []string{"Viviennes-iPad"},
-		IPv4:      "192.168.1.42",
+		IPv4:      "192.0.2.42",
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
 	}
@@ -345,7 +345,7 @@ func TestUpsertDevice_ManualNamePreserved(t *testing.T) {
 	device := &Device{
 		ID:         "dev-456",
 		ManualName: "Dad's Printer",
-		IPv4:       "192.168.1.50",
+		IPv4:       "192.0.2.50",
 		Source:     SourceManual,
 		Sources:    []DiscoverySource{SourceManual},
 		Persistent: true,
@@ -356,7 +356,7 @@ func TestUpsertDevice_ManualNamePreserved(t *testing.T) {
 	update := &Device{
 		ID:        "dev-456",
 		Hostnames: []string{"HP-Printer"},
-		IPv4:      "192.168.1.51", // IP changed!
+		IPv4:      "192.0.2.51", // IP changed!
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
 	}
@@ -379,30 +379,30 @@ func TestUpdateDeviceIP(t *testing.T) {
 	device := &Device{
 		ID:        "dev-ip",
 		Hostnames: []string{"laptop"},
-		IPv4:      "192.168.1.10",
+		IPv4:      "192.0.2.10",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
 	ds.UpsertDevice(device)
 
 	// DHCP renews — new IP
-	ds.UpdateDeviceIP("dev-ip", "192.168.1.20", "")
+	ds.UpdateDeviceIP("dev-ip", "192.0.2.20", "")
 
 	// Old record gone, new record present
 	oldRecords := ds.LookupName("laptop.local", dns.TypeA)
 	if len(oldRecords) != 1 {
 		t.Fatalf("Expected 1 A record, got %d", len(oldRecords))
 	}
-	if oldRecords[0].Value != "192.168.1.20" {
-		t.Errorf("Expected new IP 192.168.1.20, got %s", oldRecords[0].Value)
+	if oldRecords[0].Value != "192.0.2.20" {
+		t.Errorf("Expected new IP 192.0.2.20, got %s", oldRecords[0].Value)
 	}
 
 	// Old PTR gone, new PTR present
-	oldPTR := ds.LookupReverse("10.1.168.192.in-addr.arpa")
+	oldPTR := ds.LookupReverse("10.2.0.192.in-addr.arpa")
 	if len(oldPTR) != 0 {
 		t.Error("Old PTR should be gone")
 	}
-	newPTR := ds.LookupReverse("20.1.168.192.in-addr.arpa")
+	newPTR := ds.LookupReverse("20.2.0.192.in-addr.arpa")
 	if len(newPTR) != 1 {
 		t.Error("New PTR should exist")
 	}
@@ -413,7 +413,7 @@ func TestRemoveDevice(t *testing.T) {
 	device := &Device{
 		ID:        "dev-rm",
 		Hostnames: []string{"temporary"},
-		IPv4:      "192.168.1.99",
+		IPv4:      "192.0.2.99",
 		Source:    SourcePassive,
 		Sources:   []DiscoverySource{SourcePassive},
 	}
@@ -436,7 +436,7 @@ func TestFindDeviceByHostname(t *testing.T) {
 	ds := NewDeviceStore("local")
 	device := &Device{
 		Hostnames: []string{"MyLaptop"},
-		IPv4:      "192.168.1.10",
+		IPv4:      "192.0.2.10",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -446,7 +446,7 @@ func TestFindDeviceByHostname(t *testing.T) {
 	if d == nil {
 		t.Fatal("Device not found by hostname")
 	}
-	if d.IPv4 != "192.168.1.10" {
+	if d.IPv4 != "192.0.2.10" {
 		t.Errorf("Wrong device found, IPv4=%s", d.IPv4)
 	}
 }
@@ -455,7 +455,7 @@ func TestFindDeviceByMAC(t *testing.T) {
 	ds := NewDeviceStore("local")
 	device := &Device{
 		Hostnames: []string{"printer"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		MACs:      []string{"AA:BB:CC:DD:EE:FF"},
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
@@ -471,13 +471,13 @@ func TestFindDeviceByMAC(t *testing.T) {
 func TestFindDeviceByIP(t *testing.T) {
 	ds := NewDeviceStore("local")
 	device := &Device{
-		IPv4:    "192.168.1.105",
+		IPv4:    "192.0.2.105",
 		Source:  SourcePassive,
 		Sources: []DiscoverySource{SourcePassive},
 	}
 	ds.UpsertDevice(device)
 
-	d := ds.FindDeviceByIP("192.168.1.105")
+	d := ds.FindDeviceByIP("192.0.2.105")
 	if d == nil {
 		t.Fatal("Device not found by IP")
 	}
@@ -487,7 +487,7 @@ func TestMarkOffline(t *testing.T) {
 	ds := NewDeviceStore("local")
 	device := &Device{
 		ID:       "dev-offline",
-		IPv4:     "192.168.1.10",
+		IPv4:     "192.0.2.10",
 		Source:   SourcePassive,
 		Sources:  []DiscoverySource{SourcePassive},
 		LastSeen: time.Now().Add(-10 * time.Minute),
@@ -510,8 +510,8 @@ func TestMarkOffline(t *testing.T) {
 func TestImportLegacyRecords(t *testing.T) {
 	ds := NewDeviceStore("local")
 	legacy := map[string]string{
-		"nas":      "192.168.1.200",
-		"printer":  "192.168.1.50",
+		"nas":      "192.0.2.200",
+		"printer":  "192.0.2.50",
 		"ipv6host": "fd00::1",
 	}
 	count := ds.ImportLegacyRecords(legacy)
@@ -527,8 +527,8 @@ func TestImportLegacyRecords(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("Expected 1 A record for nas, got %d", len(records))
 	}
-	if records[0].Value != "192.168.1.200" {
-		t.Errorf("Expected 192.168.1.200, got %s", records[0].Value)
+	if records[0].Value != "192.0.2.200" {
+		t.Errorf("Expected 192.0.2.200, got %s", records[0].Value)
 	}
 
 	// Check AAAA record for ipv6host
@@ -554,7 +554,7 @@ func TestBareHostnameLookup(t *testing.T) {
 	ds := NewDeviceStore("local")
 	device := &Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -578,7 +578,7 @@ func TestGetAllDevices(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		ds.UpsertDevice(&Device{
 			Hostnames: []string{SanitizeDNSName("device-" + string(rune('a'+i)))},
-			IPv4:      "192.168.1." + string(rune('1'+i)),
+			IPv4:      "192.0.2." + string(rune('1'+i)),
 			Source:    SourcePassive,
 			Sources:   []DiscoverySource{SourcePassive},
 		})
@@ -618,7 +618,7 @@ func TestConcurrentAccess(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			ds.UpsertDevice(&Device{
 				Hostnames: []string{"concurrent-test"},
-				IPv4:      "192.168.1.1",
+				IPv4:      "192.0.2.1",
 				Source:    SourcePassive,
 				Sources:   []DiscoverySource{SourcePassive},
 			})
@@ -630,7 +630,7 @@ func TestConcurrentAccess(t *testing.T) {
 	go func() {
 		for i := 0; i < 100; i++ {
 			ds.LookupName("concurrent-test.local", dns.TypeA)
-			ds.FindDeviceByIP("192.168.1.1")
+			ds.FindDeviceByIP("192.0.2.1")
 			ds.GetAllDevices()
 		}
 		done <- true
@@ -683,8 +683,8 @@ func TestMultiZone_RecordsGeneratedForAllZones(t *testing.T) {
 
 	device := &Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
-		IPv6:      "fd00:1234:5678::24a",
+		IPv4:      "192.0.2.100",
+		IPv6:      "2001:db8::24a",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -695,16 +695,16 @@ func TestMultiZone_RecordsGeneratedForAllZones(t *testing.T) {
 	if len(aRecordsPrimary) != 1 {
 		t.Fatalf("Expected 1 A record for macmini.jvj28.com, got %d", len(aRecordsPrimary))
 	}
-	if aRecordsPrimary[0].Value != "192.168.1.100" {
-		t.Errorf("Expected 192.168.1.100, got %s", aRecordsPrimary[0].Value)
+	if aRecordsPrimary[0].Value != "192.0.2.100" {
+		t.Errorf("Expected 192.0.2.100, got %s", aRecordsPrimary[0].Value)
 	}
 
 	aRecordsLocal := ds.LookupName("macmini.local", dns.TypeA)
 	if len(aRecordsLocal) != 1 {
 		t.Fatalf("Expected 1 A record for macmini.local, got %d", len(aRecordsLocal))
 	}
-	if aRecordsLocal[0].Value != "192.168.1.100" {
-		t.Errorf("Expected 192.168.1.100, got %s", aRecordsLocal[0].Value)
+	if aRecordsLocal[0].Value != "192.0.2.100" {
+		t.Errorf("Expected 192.0.2.100, got %s", aRecordsLocal[0].Value)
 	}
 
 	// AAAA record should exist for BOTH zones
@@ -729,14 +729,14 @@ func TestMultiZone_PTRPointsToPrimaryZone(t *testing.T) {
 
 	device := &Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
 	ds.UpsertDevice(device)
 
 	// PTR should point to the PRIMARY zone (jvj28.com), not local
-	ptrRecords := ds.LookupReverse("100.1.168.192.in-addr.arpa")
+	ptrRecords := ds.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(ptrRecords) != 1 {
 		t.Fatalf("Expected 1 PTR record, got %d", len(ptrRecords))
 	}
@@ -773,7 +773,7 @@ func TestAddZone(t *testing.T) {
 	// Add a device first
 	device := &Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -831,7 +831,7 @@ func TestSetZones(t *testing.T) {
 
 	device := &Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -879,13 +879,13 @@ func TestMultiZone_MultipleDevices(t *testing.T) {
 
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"printer"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
 	})
@@ -917,7 +917,7 @@ func TestMultiZone_BackwardCompat_SingleZone(t *testing.T) {
 
 	device := &Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	}
@@ -933,7 +933,7 @@ func TestMultiZone_BackwardCompat_SingleZone(t *testing.T) {
 		t.Fatalf("Expected 1 A record, got %d", len(aRecords))
 	}
 
-	ptrRecords := ds.LookupReverse("100.1.168.192.in-addr.arpa")
+	ptrRecords := ds.LookupReverse("100.2.0.192.in-addr.arpa")
 	if len(ptrRecords) != 1 {
 		t.Fatalf("Expected 1 PTR record, got %d", len(ptrRecords))
 	}
@@ -950,7 +950,7 @@ func TestMultiZone_CustomDomainAsPrimary(t *testing.T) {
 	device := &Device{
 		Hostnames: []string{"Viviennes-iPad"},
 		MDNSNames: []string{"Vivienne's iPad"},
-		IPv4:      "192.168.1.42",
+		IPv4:      "192.0.2.42",
 		IPv6:      "fd00::1a3",
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
@@ -980,7 +980,7 @@ func TestMultiZone_CustomDomainAsPrimary(t *testing.T) {
 	}
 
 	// Reverse PTR points to the primary domain (jvj28.com)
-	ptr := ds.LookupReverse("42.1.168.192.in-addr.arpa")
+	ptr := ds.LookupReverse("42.2.0.192.in-addr.arpa")
 	if len(ptr) == 0 {
 		t.Fatal("Expected PTR record")
 	}
@@ -1001,7 +1001,7 @@ func TestPTR_RoundTrip_IPv4_SingleZone(t *testing.T) {
 	ds := NewDeviceStore("local")
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
@@ -1041,7 +1041,7 @@ func TestPTR_RoundTrip_IPv4_MultiZone(t *testing.T) {
 	ds := NewDeviceStoreMultiZone("jvj28.com", "local")
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
@@ -1053,13 +1053,13 @@ func TestPTR_RoundTrip_IPv4_MultiZone(t *testing.T) {
 		if len(recs) != 1 {
 			t.Fatalf("Forward lookup %s: expected 1 A record, got %d", fqdn, len(recs))
 		}
-		if recs[0].Value != "192.168.1.100" {
-			t.Errorf("Forward lookup %s: expected 192.168.1.100, got %s", fqdn, recs[0].Value)
+		if recs[0].Value != "192.0.2.100" {
+			t.Errorf("Forward lookup %s: expected 192.0.2.100, got %s", fqdn, recs[0].Value)
 		}
 	}
 
 	// Reverse lookup from the IP
-	rev := reverseIPv4("192.168.1.100")
+	rev := reverseIPv4("192.0.2.100")
 	ptrRecords := ds.LookupReverse(rev)
 	if len(ptrRecords) != 1 {
 		t.Fatalf("Expected exactly 1 PTR record, got %d", len(ptrRecords))
@@ -1073,8 +1073,8 @@ func TestPTR_RoundTrip_IPv4_MultiZone(t *testing.T) {
 
 	// The PTR target must resolve back to the same IP
 	backRecords := ds.LookupName(ptrRecords[0].Value, dns.TypeA)
-	if len(backRecords) != 1 || backRecords[0].Value != "192.168.1.100" {
-		t.Error("PTR target does not resolve back to 192.168.1.100")
+	if len(backRecords) != 1 || backRecords[0].Value != "192.0.2.100" {
+		t.Error("PTR target does not resolve back to 192.0.2.100")
 	}
 }
 
@@ -1082,7 +1082,7 @@ func TestPTR_RoundTrip_IPv6_MultiZone(t *testing.T) {
 	ds := NewDeviceStoreMultiZone("jvj28.com", "local")
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"fileserver"},
-		IPv6:      "fd00:1234:5678::24a",
+		IPv6:      "2001:db8::24a",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
@@ -1094,13 +1094,13 @@ func TestPTR_RoundTrip_IPv6_MultiZone(t *testing.T) {
 		if len(recs) != 1 {
 			t.Fatalf("Forward AAAA lookup %s: expected 1 record, got %d", fqdn, len(recs))
 		}
-		if recs[0].Value != "fd00:1234:5678::24a" {
-			t.Errorf("Forward AAAA %s: expected fd00:1234:5678::24a, got %s", fqdn, recs[0].Value)
+		if recs[0].Value != "2001:db8::24a" {
+			t.Errorf("Forward AAAA %s: expected 2001:db8::24a, got %s", fqdn, recs[0].Value)
 		}
 	}
 
 	// Reverse lookup
-	rev := reverseIPv6("fd00:1234:5678::24a")
+	rev := reverseIPv6("2001:db8::24a")
 	ptrRecords := ds.LookupReverse(rev)
 	if len(ptrRecords) != 1 {
 		t.Fatalf("Expected 1 IPv6 PTR record, got %d", len(ptrRecords))
@@ -1114,7 +1114,7 @@ func TestPTR_RoundTrip_IPv6_MultiZone(t *testing.T) {
 
 	// PTR target must resolve back
 	backRecords := ds.LookupName(ptrRecords[0].Value, dns.TypeAAAA)
-	if len(backRecords) != 1 || backRecords[0].Value != "fd00:1234:5678::24a" {
+	if len(backRecords) != 1 || backRecords[0].Value != "2001:db8::24a" {
 		t.Error("IPv6 PTR target does not resolve back to original address")
 	}
 }
@@ -1171,12 +1171,12 @@ func TestPTR_RoundTrip_ZoneSwitch(t *testing.T) {
 	ds := NewDeviceStore("local")
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"printer"},
-		IPv4:      "192.168.1.55",
+		IPv4:      "192.0.2.55",
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
 	})
 
-	rev := reverseIPv4("192.168.1.55")
+	rev := reverseIPv4("192.0.2.55")
 	ptr1 := ds.LookupReverse(rev)
 	if len(ptr1) != 1 || ptr1[0].Value != "printer.local" {
 		t.Fatalf("Before zone switch: expected PTR → 'printer.local', got %v", ptr1)
@@ -1196,7 +1196,7 @@ func TestPTR_RoundTrip_ZoneSwitch(t *testing.T) {
 
 	// Forward lookup on the new PTR target must work
 	back := ds.LookupName(ptr2[0].Value, dns.TypeA)
-	if len(back) != 1 || back[0].Value != "192.168.1.55" {
+	if len(back) != 1 || back[0].Value != "192.0.2.55" {
 		t.Error("PTR target after zone switch doesn't resolve back")
 	}
 }
@@ -1206,13 +1206,13 @@ func TestPTR_NoDuplicates_MultiZone(t *testing.T) {
 	ds := NewDeviceStoreMultiZone("jvj28.com", "local", "home.arpa")
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"macmini"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		IPv6:      "fd00::1a",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
 
-	rev4 := reverseIPv4("192.168.1.100")
+	rev4 := reverseIPv4("192.0.2.100")
 	ptr4 := ds.LookupReverse(rev4)
 	if len(ptr4) != 1 {
 		t.Errorf("IPv4 should have exactly 1 PTR record even with 3 zones, got %d", len(ptr4))
@@ -1248,32 +1248,32 @@ func TestPTR_NoDuplicates_MultiZone(t *testing.T) {
 func TestUpsertDevice_EvictsIPv4FromOtherDevice(t *testing.T) {
 	ds := NewDeviceStore("local")
 
-	// Device A gets 192.168.1.100
+	// Device A gets 192.0.2.100
 	idA := ds.UpsertDevice(&Device{
 		Hostnames: []string{"device-a"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourcePassive,
 		Sources:   []DiscoverySource{SourcePassive},
 	})
 
 	// Verify A has the IP
-	a := ds.FindDeviceByIP("192.168.1.100")
+	a := ds.FindDeviceByIP("192.0.2.100")
 	if a == nil || a.ID != idA {
-		t.Fatal("Expected device A to own 192.168.1.100")
+		t.Fatal("Expected device A to own 192.0.2.100")
 	}
 
 	// Device B gets the SAME IP (DHCP reassigned it)
 	idB := ds.UpsertDevice(&Device{
 		Hostnames: []string{"device-b"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
 
 	// B now owns the IP
-	b := ds.FindDeviceByIP("192.168.1.100")
+	b := ds.FindDeviceByIP("192.0.2.100")
 	if b == nil || b.ID != idB {
-		t.Fatalf("Expected device B to own 192.168.1.100, got %+v", b)
+		t.Fatalf("Expected device B to own 192.0.2.100, got %+v", b)
 	}
 
 	// A should have lost the IP
@@ -1333,7 +1333,7 @@ func TestUpsertDevice_SameDeviceSameIP_NoEviction(t *testing.T) {
 
 	id := ds.UpsertDevice(&Device{
 		Hostnames: []string{"device-a"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
@@ -1342,13 +1342,13 @@ func TestUpsertDevice_SameDeviceSameIP_NoEviction(t *testing.T) {
 	ds.UpsertDevice(&Device{
 		ID:        id,
 		Hostnames: []string{"device-a"},
-		IPv4:      "192.168.1.50",
+		IPv4:      "192.0.2.50",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})
 
 	d := ds.GetDevice(id)
-	if d.IPv4 != "192.168.1.50" {
+	if d.IPv4 != "192.0.2.50" {
 		t.Errorf("Expected IP preserved on same-device upsert, got %q", d.IPv4)
 	}
 }
@@ -1358,35 +1358,35 @@ func TestUpdateDeviceIP_EvictsFromOtherDevice(t *testing.T) {
 
 	idA := ds.UpsertDevice(&Device{
 		Hostnames: []string{"device-a"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourcePassive,
 		Sources:   []DiscoverySource{SourcePassive},
 	})
 
 	idB := ds.UpsertDevice(&Device{
 		Hostnames: []string{"device-b"},
-		IPv4:      "192.168.1.200",
+		IPv4:      "192.0.2.200",
 		Source:    SourcePassive,
 		Sources:   []DiscoverySource{SourcePassive},
 	})
 
 	// B takes A's IP via UpdateDeviceIP
-	ds.UpdateDeviceIP(idB, "192.168.1.100", "")
+	ds.UpdateDeviceIP(idB, "192.0.2.100", "")
 
 	bAfter := ds.GetDevice(idB)
-	if bAfter.IPv4 != "192.168.1.100" {
-		t.Errorf("Expected B to have 192.168.1.100, got %q", bAfter.IPv4)
+	if bAfter.IPv4 != "192.0.2.100" {
+		t.Errorf("Expected B to have 192.0.2.100, got %q", bAfter.IPv4)
 	}
 
 	aAfter := ds.GetDevice(idA)
 	if aAfter.IPv4 != "" {
-		t.Errorf("Expected A to lose 192.168.1.100 after eviction, got %q", aAfter.IPv4)
+		t.Errorf("Expected A to lose 192.0.2.100 after eviction, got %q", aAfter.IPv4)
 	}
 
 	// DNS records should reflect the new state
 	recsB := ds.LookupName("device-b.local", dns.TypeA)
-	if len(recsB) != 1 || recsB[0].Value != "192.168.1.100" {
-		t.Errorf("Expected B to have A record for 192.168.1.100, got %+v", recsB)
+	if len(recsB) != 1 || recsB[0].Value != "192.0.2.100" {
+		t.Errorf("Expected B to have A record for 192.0.2.100, got %+v", recsB)
 	}
 	recsA := ds.LookupName("device-a.local", dns.TypeA)
 	if len(recsA) != 0 {
@@ -1401,7 +1401,7 @@ func TestUpsertDevice_EvictionPreservesDeviceIdentity(t *testing.T) {
 	idA := ds.UpsertDevice(&Device{
 		Hostnames: []string{"printer"},
 		MACs:      []string{"aa:bb:cc:dd:ee:ff"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceMDNS,
 		Sources:   []DiscoverySource{SourceMDNS},
 	})
@@ -1409,7 +1409,7 @@ func TestUpsertDevice_EvictionPreservesDeviceIdentity(t *testing.T) {
 	// Device B steals A's IP
 	ds.UpsertDevice(&Device{
 		Hostnames: []string{"laptop"},
-		IPv4:      "192.168.1.100",
+		IPv4:      "192.0.2.100",
 		Source:    SourceDDNS,
 		Sources:   []DiscoverySource{SourceDDNS},
 	})

@@ -2,7 +2,7 @@
 
 An open-source DNS filter, HTTPS-inspecting proxy, and parental-control appliance with a web admin UI.
 
-**This is the v2 branch** (`2.0.0-beta.4`), a fork of [fifthsegment/Gatesentry](https://github.com/fifthsegment/Gatesentry). Filtering is rule-based (Allow or Block, per user) rather than a pile of global lists. Pre-release: APIs and settings may still change.
+**This is the v2 branch** (`2.0.0-beta.5`), a fork of [fifthsegment/Gatesentry](https://github.com/fifthsegment/Gatesentry). Filtering is rule-based (Allow or Block, per user) rather than a pile of global lists. Pre-release: APIs and settings may still change.
 
 [Release notes](https://github.com/jbarwick/Gatesentry/releases/tag/v2.0.0-beta.3) · [RFC to upstream](https://github.com/fifthsegment/Gatesentry/pull/141)
 
@@ -21,7 +21,7 @@ Typical uses: ad / tracker blocking, parental controls, bandwidth saving, phishi
 | **Docker Engine + Compose v2** | optional | Recommended way to run it |
 | **Linux** | — | Primary target (transparent proxy and TPROXY are Linux-only) |
 
-The Docker image is **runtime-only**: it copies a binary you already built with `./build.sh`. There is no pre-built `2.0.0-beta.4` image on Docker Hub yet (`jbarwick/gatesentry:latest` is still `2.0.0-alpha.15`).
+The Docker image is **runtime-only**: it copies a binary you already built with `./build.sh`. There is no pre-built `2.0.0-beta.5` image on Docker Hub yet (`jbarwick/gatesentry:latest` is still `2.0.0-alpha.15`).
 
 ---
 
@@ -123,7 +123,7 @@ Optional Linux service (from the `bin/` directory):
 sudo service gatesentry start   # name depends on the OS service manager
 ```
 
-`run.sh` / `restart.sh` default `GATESENTRY_DNS_RESOLVER` to `192.168.1.1:53` for this developer’s LAN. On your server, either unset it or point it at **your** recursive DNS. A non-empty value **overwrites** the stored `dns_resolver` setting on startup.
+`run.sh` / `restart.sh` default `GATESENTRY_DNS_RESOLVER` to `192.0.2.1:53` for this developer’s LAN. On your server, either unset it or point it at **your** recursive DNS. A non-empty value **overwrites** the stored `dns_resolver` setting on startup.
 
 ---
 

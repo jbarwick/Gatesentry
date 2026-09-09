@@ -282,19 +282,43 @@ func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
 		return
 	}
 
-	// Try to find an existing device to enrich
-	var existing *Device
+	var ipOwner, nameOwner *Device
 	if ipv4 != "" {
-		existing = b.store.FindDeviceByIP(ipv4)
+		ipOwner = b.store.FindDeviceByIP(ipv4)
 	}
-	if existing == nil && ipv6 != "" {
-		existing = b.store.FindDeviceByIP(ipv6)
+	if ipOwner == nil && ipv6 != "" {
+		ipOwner = b.store.FindDeviceByIP(ipv6)
 	}
-	if existing == nil && hostname != "" {
-		existing = b.store.FindDeviceByHostname(hostname)
+	if hostname != "" {
+		nameOwner = b.store.FindDeviceByHostname(hostname)
 	}
-	if existing == nil && instanceName != "" {
-		existing = b.store.FindDeviceByHostname(instanceName)
+	if nameOwner == nil && instanceName != "" {
+		nameOwner = b.store.FindDeviceByHostname(instanceName)
+	}
+
+	// A name and an IP that already belong to two different devices must not
+	// be fused. mDNS additional-section A records are often wrong.
+	if nameOwner != nil && ipOwner != nil && nameOwner.ID != ipOwner.ID {
+		log.Printf("[mDNS] Ignoring %q (%s) at %s: name belongs to %s, IP belongs to %s",
+			instanceName, hostname, ipv4, nameOwner.GetDisplayName(), ipOwner.GetDisplayName())
+		return
+	}
+
+	// An IP that already has a hostname is not renamed by a different name
+	// seen at that address. Passive (unnamed) devices can still be enriched.
+	incomingKey := hostnameKey(hostname)
+	if incomingKey == "" {
+		incomingKey = hostnameKey(instanceName)
+	}
+	if ipOwner != nil && incomingKey != "" && ipOwner.HasIdentity() && !ipOwner.HasHostnameKey(incomingKey) {
+		log.Printf("[mDNS] Ignoring %q (%s) at %s: IP already identified as %s",
+			instanceName, hostname, ipv4, ipOwner.GetDisplayName())
+		return
+	}
+
+	existing := ipOwner
+	if existing == nil {
+		existing = nameOwner
 	}
 
 	// Build the device struct for upsert

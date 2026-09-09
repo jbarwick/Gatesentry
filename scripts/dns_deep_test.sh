@@ -1555,8 +1555,8 @@ test_ptr_records() {
     fi
 
     # Test private IP range reverse (should likely fail or return nothing)
-    print_test "Private IP reverse lookup (192.168.1.1)"
-    result=$(dns_query "1.1.168.192.in-addr.arpa" "PTR")
+    print_test "Private IP reverse lookup (192.0.2.1)"
+    result=$(dns_query "1.2.0.192.in-addr.arpa" "PTR")
     if [[ -z "$result" ]]; then
         print_pass "Correctly returns empty for private IP reverse"
     else

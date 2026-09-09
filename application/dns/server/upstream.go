@@ -24,7 +24,7 @@ var (
 
 func init() {
 	resolverValue.Store("8.8.8.8:53")
-	resolverIPv6Value.Store("[fd00:1234:5678::1]:53")
+	resolverIPv6Value.Store("[2001:db8::1]:53")
 }
 
 func currentResolver() string {

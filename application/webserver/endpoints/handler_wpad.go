@@ -162,7 +162,7 @@ func GeneratePACFile(proxyHost, proxyPort string, bypassDomains []string) string
     }
 
     // Private IP literals — only bypass when the USER typed a private IP
-    // in the address bar (e.g. http://192.168.1.1, http://10.0.0.1).
+    // in the address bar (e.g. http://192.0.2.1, http://10.0.0.1).
     //
     // IMPORTANT: We do NOT use dnsResolve() here.  dnsResolve() would
     // cause DNS-blocked domains (which resolve to GateSentry's private IP)

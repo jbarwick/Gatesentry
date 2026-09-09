@@ -84,7 +84,7 @@ func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 //
 // On Linux, reads /proc/net/arp which is fast (virtual filesystem).
 // Format: IP address, HW type, Flags, HW address, Mask, Device
-// Example: 192.168.1.100 0x1 0x2 aa:bb:cc:dd:ee:ff * eth0
+// Example: 192.0.2.10 0x1 0x2 aa:bb:cc:dd:ee:ff * eth0
 //
 // On non-Linux systems, returns "" (future: support arp -a, ndp).
 func LookupARPEntry(ip string) string {

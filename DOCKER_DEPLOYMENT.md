@@ -219,9 +219,9 @@ integration — the same mechanism used by enterprise networks worldwide.
 
 ```
 Device connects to Wi-Fi
-    → Router's DHCP assigns 192.168.1.42 to "Viviennes-iPad"
+    → Router's DHCP assigns 192.0.2.42 to "Viviennes-iPad"
     → Router sends DNS UPDATE to GateSentry:
-        "viviennes-ipad.local  A  192.168.1.42"
+        "viviennes-ipad.local  A  192.0.2.42"
     → GateSentry updates its device inventory
     → "viviennes-ipad.local" now resolves on the network
 ```
@@ -488,7 +488,7 @@ sudo ss -tlnp | grep :53
    nsupdate -y hmac-sha256:dhcp-key:YWJj... <<EOF
    server <gatesentry-ip>
    zone local.
-   update add test.local. 300 A 192.168.1.99
+   update add test.local. 300 A 192.0.2.99
    send
    EOF
    ```

@@ -310,13 +310,21 @@ func applyDDNSAdd(update ddnsUpdate, zone string) {
 		return
 	}
 
-	// Match existing device by hostname or IP to merge
+	// Match by hostname first. Only reuse the IP's device when it has no
+	// identity yet, or already owns this hostname. Do not glue two named
+	// devices together because they briefly shared an address.
 	existing := deviceStore.FindDeviceByHostname(hostname)
-	if existing == nil && device.IPv4 != "" {
-		existing = deviceStore.FindDeviceByIP(device.IPv4)
-	}
-	if existing == nil && device.IPv6 != "" {
-		existing = deviceStore.FindDeviceByIP(device.IPv6)
+	if existing == nil {
+		var ipOwner *discovery.Device
+		if device.IPv4 != "" {
+			ipOwner = deviceStore.FindDeviceByIP(device.IPv4)
+		}
+		if ipOwner == nil && device.IPv6 != "" {
+			ipOwner = deviceStore.FindDeviceByIP(device.IPv6)
+		}
+		if ipOwner != nil && (!ipOwner.HasIdentity() || ipOwner.HasHostnameKey(hostname)) {
+			existing = ipOwner
+		}
 	}
 	if existing != nil {
 		device.ID = existing.ID
