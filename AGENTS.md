@@ -37,10 +37,11 @@ Do **not** ad-hoc `scp` binaries, `ssh` a `docker build` on the NAS, or hand-edi
 
 **Local Docker is required for `release.sh`.** Start Docker Desktop (WSL integration) if `docker info` fails. The NAS still runs the production container; that is a different Docker daemon.
 
-**Nexus publish (`release.sh`)** needs `NEXUS_SERVER` (default `https://monster-jj.jvj28.com:9092`) and one of:
+**Nexus publish (`release.sh`)** needs `NEXUS_SERVER` (default `https://monster-jj.jvj28.com:9092`) and credentials:
 
-- **`NEXUS_TOKEN`** (preferred) — used as the docker login username. Some Nexus endpoints, especially when addressed by **IP**, reject `NEXUS_USERNAME` and require the token. Password is `NEXUS_PASSWORD` if set, otherwise the token again.
-- **`NEXUS_USERNAME` + `NEXUS_PASSWORD`** — account login when no token is set.
+- Hostname (e.g. `monster-jj.jvj28.com:9092`): **`NEXUS_USERNAME` + `NEXUS_PASSWORD`**
+- Nexus by **IP**: **`NEXUS_TOKEN`** as docker `-u` (account username is often rejected)
+- If the first method fails, `release.sh` tries the other when both are set
 
 Do not print these values. Image: `monster-jj.jvj28.com:9092/gatesentry:<GATESENTRY_VERSION>`.
 

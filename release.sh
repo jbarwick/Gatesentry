@@ -16,10 +16,9 @@ set -euo pipefail
 #
 # Environment:
 #   NEXUS_SERVER      default https://monster-jj.jvj28.com:9092
-#   NEXUS_TOKEN       preferred docker login username (required for some
-#                     Nexus IP endpoints)
-#   NEXUS_USERNAME    docker login username when NEXUS_TOKEN is unset
-#   NEXUS_PASSWORD    docker login password (token passcode, or user password)
+#   NEXUS_TOKEN       docker login username for some Nexus IP endpoints
+#   NEXUS_USERNAME    docker login username (hostname registries)
+#   NEXUS_PASSWORD    docker login password for the account
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -47,6 +46,19 @@ require_docker() {
         echo "  Start Docker Desktop and retry." >&2
         exit 1
     fi
+}
+
+nexus_host_is_ip() {
+    local host="${NEXUS_REGISTRY%%:*}"
+    [[ "$host" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && return 0
+    [[ "$host" == \[* ]] && return 0
+    return 1
+}
+
+nexus_docker_login() {
+    local user="$1" pass="$2" how="$3"
+    echo "  docker login (${how})"
+    printf '%s\n' "$pass" | docker login "${NEXUS_REGISTRY}" -u "$user" --password-stdin
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -77,32 +89,53 @@ if [[ ! -x bin/gatesentrybin ]]; then
     exit 1
 fi
 
-# Some Nexus listeners (especially by IP) want the user token as -u, not the
-# account name. Prefer NEXUS_TOKEN; otherwise NEXUS_USERNAME + NEXUS_PASSWORD.
-if [[ -n "${NEXUS_TOKEN:-}" ]]; then
-    NEXUS_LOGIN_USER="$NEXUS_TOKEN"
-    NEXUS_LOGIN_PASS="${NEXUS_PASSWORD:-$NEXUS_TOKEN}"
-    NEXUS_LOGIN_HOW="token"
-elif [[ -n "${NEXUS_USERNAME:-}" && -n "${NEXUS_PASSWORD:-}" ]]; then
-    NEXUS_LOGIN_USER="$NEXUS_USERNAME"
-    NEXUS_LOGIN_PASS="$NEXUS_PASSWORD"
-    NEXUS_LOGIN_HOW="username"
-else
+HAS_USER=false
+HAS_TOKEN=false
+[[ -n "${NEXUS_USERNAME:-}" && -n "${NEXUS_PASSWORD:-}" ]] && HAS_USER=true
+[[ -n "${NEXUS_TOKEN:-}" ]] && HAS_TOKEN=true
+
+if [[ "$HAS_USER" != true && "$HAS_TOKEN" != true ]]; then
     echo "error: set NEXUS_TOKEN, or NEXUS_USERNAME and NEXUS_PASSWORD" >&2
     exit 1
+fi
+
+# Hostname registries typically want the account. Nexus reached by IP often
+# wants NEXUS_TOKEN as docker -u, not NEXUS_USERNAME.
+FIRST_AUTH="username"
+if nexus_host_is_ip && [[ "$HAS_TOKEN" == true ]]; then
+    FIRST_AUTH="token"
+elif [[ "$HAS_USER" != true ]]; then
+    FIRST_AUTH="token"
 fi
 
 echo "Release ${VERSION}"
 echo "  Local:  ${IMAGE_NAME}:${VERSION}"
 echo "  Remote: ${REPO}:${VERSION}"
-echo "  Auth:   ${NEXUS_LOGIN_HOW}"
 echo ""
 
 echo "── Packaging image ───────────────────────────────────────────"
 docker build -t "${IMAGE_NAME}:${VERSION}" -t "${REPO}:${VERSION}" -t "${REPO}:latest" .
 
 echo "── Publishing to Nexus (${NEXUS_REGISTRY}) ───────────────────"
-printf '%s\n' "$NEXUS_LOGIN_PASS" | docker login "${NEXUS_REGISTRY}" -u "${NEXUS_LOGIN_USER}" --password-stdin
+logged_in=false
+if [[ "$FIRST_AUTH" == "token" ]]; then
+    if nexus_docker_login "$NEXUS_TOKEN" "$NEXUS_TOKEN" "token"; then
+        logged_in=true
+    elif [[ "$HAS_USER" == true ]] && nexus_docker_login "$NEXUS_USERNAME" "$NEXUS_PASSWORD" "username"; then
+        logged_in=true
+    fi
+else
+    if nexus_docker_login "$NEXUS_USERNAME" "$NEXUS_PASSWORD" "username"; then
+        logged_in=true
+    elif [[ "$HAS_TOKEN" == true ]] && nexus_docker_login "$NEXUS_TOKEN" "$NEXUS_TOKEN" "token"; then
+        logged_in=true
+    fi
+fi
+if [[ "$logged_in" != true ]]; then
+    echo "error: docker login to ${NEXUS_REGISTRY} failed" >&2
+    exit 1
+fi
+
 docker push "${REPO}:${VERSION}"
 docker push "${REPO}:latest"
 
