@@ -75,9 +75,24 @@ type Device struct {
 	// LastSeen is when the device was last observed (any method).
 	LastSeen time.Time `json:"last_seen"`
 
-	// Online indicates whether the device has been seen within the
-	// configured online threshold (default: 5 minutes).
+	// LastDNSQuery is when a DNS query was last observed from this device
+	// (passive discovery). Distinct from LastSeen, which also updates on
+	// mDNS/DDNS. Zero if no DNS query has been seen.
+	LastDNSQuery time.Time `json:"last_dns_query,omitempty"`
+
+	// Online is true only when the most recent ICMP ping succeeded.
+	// It is not derived from DNS activity — quiet devices can still be online.
 	Online bool `json:"online"`
+
+	// PingStatus is "online", "offline", or "unknown".
+	// unknown: not yet probed, no IP to ping, or ping is unavailable.
+	PingStatus string `json:"ping_status"`
+
+	// LastPing is when reachability was last probed.
+	LastPing time.Time `json:"last_ping,omitempty"`
+
+	// PingRTTMs is the last successful ping round-trip time in milliseconds.
+	PingRTTMs int64 `json:"ping_rtt_ms,omitempty"`
 
 	// --- User-managed fields ---
 
@@ -231,6 +246,32 @@ const DefaultTTL uint32 = 60
 // ManualTTL for manually-entered records.
 const ManualTTL uint32 = 300
 
-// OnlineThreshold is how recently a device must have been seen
-// to be considered "online".
+// OnlineThreshold is how recently a DNS query must have been seen
+// to treat DNS activity as "recent" in the UI.
 const OnlineThreshold = 5 * time.Minute
+
+// Ping status values returned in Device.PingStatus.
+const (
+	PingStatusOnline  = "online"
+	PingStatusOffline = "offline"
+	PingStatusUnknown = "unknown"
+)
+
+// HasRecentDNS reports whether a DNS query was observed within threshold.
+func (d *Device) HasRecentDNS(threshold time.Duration) bool {
+	if d == nil || d.LastDNSQuery.IsZero() {
+		return false
+	}
+	return time.Since(d.LastDNSQuery) < threshold
+}
+
+// PingTarget returns the address to probe: IPv4 preferred, then IPv6.
+func (d *Device) PingTarget() string {
+	if d == nil {
+		return ""
+	}
+	if d.IPv4 != "" {
+		return d.IPv4
+	}
+	return d.IPv6
+}

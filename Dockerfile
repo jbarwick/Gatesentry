@@ -12,7 +12,7 @@
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata iputils
 
 WORKDIR /usr/local/gatesentry
 

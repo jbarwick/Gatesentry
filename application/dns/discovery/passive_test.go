@@ -80,8 +80,11 @@ func TestObservePassiveQuery_CreatesNewDevice(t *testing.T) {
 	if device.Source != SourcePassive {
 		t.Errorf("Expected source passive, got %s", device.Source)
 	}
-	if !device.Online {
-		t.Error("Expected device to be online")
+	if device.LastDNSQuery.IsZero() {
+		t.Error("Expected LastDNSQuery to be set")
+	}
+	if device.Online {
+		t.Error("New devices should not be marked online until pinged")
 	}
 	if device.FirstSeen.IsZero() {
 		t.Error("Expected FirstSeen to be set")
@@ -129,6 +132,9 @@ func TestObservePassiveQuery_TouchesKnownDevice(t *testing.T) {
 	}
 	if time.Since(device.LastSeen) > 2*time.Second {
 		t.Errorf("Expected LastSeen to be recent, got %v ago", time.Since(device.LastSeen))
+	}
+	if device.LastDNSQuery.IsZero() || time.Since(device.LastDNSQuery) > 2*time.Second {
+		t.Errorf("Expected LastDNSQuery to be recent, got %v", device.LastDNSQuery)
 	}
 }
 

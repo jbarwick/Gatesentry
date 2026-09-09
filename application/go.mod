@@ -16,6 +16,7 @@ require (
 	github.com/rogpeppe/go-charset v0.0.0-20190617161244-0dc95cdf6f31
 	github.com/tidwall/buntdb v1.2.6
 	golang.org/x/image v0.33.0
+	golang.org/x/net v0.43.0
 )
 
 require (
@@ -73,7 +74,6 @@ require (
 	github.com/yosssi/ace v0.0.5 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65 // indirect

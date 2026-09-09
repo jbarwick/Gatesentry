@@ -75,6 +75,9 @@ func TestPersistRoundTrip(t *testing.T) {
 			if d.Source != SourceDDNS {
 				t.Errorf("macmini Source = %v, want %v", d.Source, SourceDDNS)
 			}
+			if d.PingStatus != PingStatusUnknown {
+				t.Errorf("loaded ping status = %q, want unknown", d.PingStatus)
+			}
 		}
 	}
 	if !found {

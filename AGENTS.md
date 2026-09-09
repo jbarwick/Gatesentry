@@ -7,25 +7,54 @@ Important context for AI agents working on this project.
 - **Active development is `v2`** (this checkout tracks `myfork/v2`). Do not treat origin/master or v1.20.x / "1.2" as the working tree.
 - Upstream: `origin` = https://github.com/fifthsegment/Gatesentry.git
 - Fork: `myfork` = https://github.com/jbarwick/Gatesentry.git
-- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.3`). Production on monster-jj is `2.0.0-beta.2` until this image is published.
+- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.4`). That string is the only release tag. Do not invent a different version for the image.
 
 ## Which tree to use for deployments
 
 | Location | What it is | Use for |
 |----------|------------|---------|
-| **This repo (`Gatesentry`, branch `v2`)** | Application source, Dockerfile, tests, `docker-publish.sh` | All code, image builds, v2 features (`2.0.0-beta.3`) |
-| **`../gatesentry-synology`** | One-file Synology compose overlay | NAS-specific volume/network/env. Synced to `2.0.0-beta.1` + `GATESENTRY_DNS_RESOLVER`. |
-| **`/volume1/docker/Gatesentry/` on monster-jj** | Live production compose + data volume | Actual deploy. Last running image was `2.0.0-alpha.15`; bump to `2.0.0-beta.1` after publish. |
+| **This repo (`Gatesentry`, branch `v2`)** | Application source, Dockerfile, tests, `build.sh` / `release.sh` / `deploy.sh` | All code, image builds, v2 features |
+| **`../gatesentry-synology`** | One-file Synology compose overlay | NAS-specific volume/network/env. `deploy.sh` keeps its image tag in sync. |
+| **`/volume1/docker/Gatesentry/` on monster-jj** | Live production compose + data volume | Actual run. `deploy.sh` writes the image tag here and recreates the container. |
 
-**Use this v2 project to build and publish images. Deploy on monster-jj with the NAS compose** (host network, port 53, admin 9876, data on `/volume1/docker/Gatesentry/gatesentry`), **not** with this repo's public samples: `docker-compose.yml` (bridged 8080/10053) or `docker-compose.host.yml` (generic host-network, admin 8080). After publishing a new image, update the image tag in `/volume1/docker/Gatesentry/docker-compose.yml` (and sync `../gatesentry-synology` so it does not drift).
+**Use this v2 repo to build and publish. Deploy on monster-jj with the NAS compose** (host network, port 53, admin 9876, data on `/volume1/docker/Gatesentry/gatesentry`), **not** with this repo's public samples: `docker-compose.yml` (bridged 8080/10053) or `docker-compose.host.yml` (generic host-network, admin 8080).
+
+## Ship pipeline (required)
+
+Do **not** ad-hoc `scp` binaries, `ssh` a `docker build` on the NAS, or hand-edit the compose tag. Use these three scripts in order. Version is always `GATESENTRY_VERSION` from `main.go`.
+
+```bash
+./build.sh      # 1. binaries only (UI + Go → bin/gatesentrybin)
+./release.sh    # 2. package + publish to Nexus (requires local Docker)
+./deploy.sh     # 3. install that tag on the NAS
+```
+
+| Script | Does | Does not |
+|--------|------|----------|
+| **`./build.sh`** | Build Svelte UI (if `ui/node_modules` exists) and `bin/gatesentrybin` | Docker, Nexus, NAS |
+| **`./release.sh`** | `docker build` a runtime image; tag `gatesentry:<ver>`, `<nexus>/gatesentry:<ver>`, and `:latest`; **push both tags to Nexus** | Run the container; touch NAS compose |
+| **`./deploy.sh`** | SSH to monster-jj, set the compose image tag, `docker-compose pull && up -d`, wait for admin, sync `../gatesentry-synology` | Rebuild the binary or image |
+
+**Local Docker is required for `release.sh`.** Start Docker Desktop (WSL integration) if `docker info` fails. The NAS still runs the production container; that is a different Docker daemon.
+
+**Nexus publish (`release.sh`)** needs `NEXUS_SERVER` (default `https://monster-jj.jvj28.com:9092`) and one of:
+
+- **`NEXUS_TOKEN`** (preferred) — used as the docker login username. Some Nexus endpoints, especially when addressed by **IP**, reject `NEXUS_USERNAME` and require the token. Password is `NEXUS_PASSWORD` if set, otherwise the token again.
+- **`NEXUS_USERNAME` + `NEXUS_PASSWORD`** — account login when no token is set.
+
+Do not print these values. Image: `monster-jj.jvj28.com:9092/gatesentry:<GATESENTRY_VERSION>`.
+
+**NAS install (`deploy.sh`)** uses Synology's `docker-compose` binary (not the `docker compose` plugin). Target: `root@monster-jj`, compose file `/volume1/docker/Gatesentry/docker-compose.yml`. After deploy, admin is `http://monster-jj:9876/gatesentry/` (`/api/about` reports `version`).
+
+`docker-publish.sh` is the older Docker Hub / Nexus helper. Do not use it for the NAS pipeline; `release.sh` is the Nexus publish step.
 
 ## Deployment Target
 
 - **Production/target server**: `monster-jj` — Synology DS1618+, SSH as root: `ssh root@monster-jj`
-- **Docker runs on monster-jj**, NOT on the local development machine
-- To check logs, containers, or service health: `ssh root@monster-jj` first, then use `docker` commands
-- The local machine is **development only** — the GateSentry binary does not run locally in normal workflow
-- **PATH on monster-jj**: `export PATH=$PATH:/usr/local/bin:/usr/bin` (docker is `/usr/local/bin/docker`)
+- **Image build**: local Docker Desktop via `./release.sh`
+- **Production container**: Docker on monster-jj via `./deploy.sh`
+- To check logs, containers, or service health: `ssh root@monster-jj` first, then `export PATH=$PATH:/usr/local/bin:/usr/bin` (docker is `/usr/local/bin/docker`; compose is `docker-compose`)
+- The GateSentry **process** does not run on the workstation in the normal workflow (`./restart.sh` is local/dev only)
 - Compose project: `/volume1/docker/Gatesentry/docker-compose.yml`
 - Data: `/volume1/docker/Gatesentry/gatesentry/` (`GSSettings`, `log.db`, `devices.json`, `filterfiles/`)
 
@@ -36,13 +65,11 @@ Important context for AI agents working on this project.
 - **Embedded UI** — The built UI is copied into `application/webserver/frontend/files/` and embedded in the Go binary
 - **`gatesentryproxy` is Go 1.17** — range-loop variable pointers (`&item` in `for _, item := range`) are still a bug there
 
-## Build & Run
+## Build & Run (local/dev)
 
-- **Build everything** (UI + Go binary): `./build.sh`
-- **Restart the running server** (does NOT rebuild): `./restart.sh` (local/dev only)
-- **Publish image to Nexus on monster-jj**: `./docker-publish.sh --nexus --version <ver>`
-- **Typical v2 production workflow**: Edit on `v2` → `./build.sh` → `./docker-publish.sh --nexus --version …` → on NAS, bump the compose image tag → `docker compose up -d`
-- The Go binary is output to `bin/gatesentrybin`
+- **Build binaries**: `./build.sh` → `bin/gatesentrybin`
+- **Restart a local binary** (does NOT rebuild or deploy): `./restart.sh`
+- Ship to production: see **Ship pipeline** above (`build.sh` → `release.sh` → `deploy.sh`)
 - The server runs from the `bin/` directory (working dir matters for data paths)
 - Log output goes to `log.txt` locally; on the NAS use `docker logs gatesentry`
 - **Deep test DNS & proxy**: `scripts/dns_deep_test.sh`
@@ -280,4 +307,4 @@ We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_R
 - **DNS page UI load/save of assigned list IDs** (`dnslists.svelte` / `dns.svelte`) was still being debugged. DNS filtering itself works.
 - **Production hang when upstream DNS is down** — see Availability section. Highest priority before bringing monster-jj back.
 - **`log.db` growth** (134MB) — stats default to a 7-day full scan (`handler_stats.go`).
-- **Publish and deploy `2.0.0-beta.1`** to monster-jj (see `PLAN.md` Phase 0).
+- Production image on monster-jj is `2.0.0-beta.4`. Next ship: bump `GATESENTRY_VERSION` in `main.go`, then `./build.sh && ./release.sh && ./deploy.sh`.

@@ -1,7 +1,17 @@
 # CHANGELOG
 
-## v2.0.0-beta.3 (2 September 2026)
+## v2.0.0-beta.4 (9 September 2026)
 
+- Devices list: query tag is last DNS request the device sent to GateSentry (`No queries` / `Queried …`), not a missing DNS record
+- Ship pipeline: `./build.sh` (binaries), `./release.sh` (image + Nexus), `./deploy.sh` (NAS)
+- `release.sh` logs into Nexus with `NEXUS_TOKEN` when set (needed for some IP endpoints), otherwise `NEXUS_USERNAME` / `NEXUS_PASSWORD`
+
+## v2.0.0-beta.3 (9 September 2026)
+
+- Devices page: online/offline is ICMP ping on page open (and refresh), not last DNS query
+- Devices detail dialog: separate reachability (ping, RTT) and DNS activity; Ping now
+- `POST /api/devices/probe` and `POST /api/devices/{id}/probe`; last DNS query is tracked separately
+- Runtime image includes `iputils` so ping can fall back to the system ping binary
 - Public install docs: README now matches how v2 is actually built and run
 - Sample `docker-compose.yml` (bridged 8080/10053) and `docker-compose.host.yml` (Linux host network, DNS 53)
 - Dockerfile/compose notes: quote `GATESENTRY_DNS_ADDR=0.0.0.0,::`; do not set `GATESENTRY_DNS_RESOLVER` unless you want it to overwrite stored settings

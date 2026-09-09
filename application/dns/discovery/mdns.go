@@ -303,7 +303,6 @@ func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
 		Sources: []DiscoverySource{SourceMDNS},
 		IPv4:    ipv4,
 		IPv6:    ipv6,
-		Online:  true,
 	}
 
 	if instanceName != "" {

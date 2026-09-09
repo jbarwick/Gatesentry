@@ -9,7 +9,9 @@
 </div>
 
 <p class="dev-desc">
-  Devices discovered on your network via DNS queries, mDNS, and DDNS updates.
+  Devices discovered via DNS queries, mDNS, and DDNS. Online/offline is ping
+  when you open this page. The query tag is the last DNS request the device
+  sent to GateSentry — not whether it has a name or address record.
 </p>
 
 <DeviceList />

@@ -47,6 +47,7 @@ func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 			} else {
 				ds.UpdateDeviceIP(existingByMAC.ID, "", clientIP)
 			}
+			ds.TouchDevice(existingByMAC.ID)
 			log.Printf("[Discovery] Passive: updated IP for device %s (%s → %s)",
 				existingByMAC.GetDisplayName(), existingByMAC.IPv4, clientIP)
 			return
@@ -56,11 +57,12 @@ func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 	// Completely new device — create a passive entry
 	now := time.Now()
 	device := &Device{
-		Source:    SourcePassive,
-		Sources:   []DiscoverySource{SourcePassive},
-		FirstSeen: now,
-		LastSeen:  now,
-		Online:    true,
+		Source:       SourcePassive,
+		Sources:      []DiscoverySource{SourcePassive},
+		FirstSeen:    now,
+		LastSeen:     now,
+		LastDNSQuery: now,
+		PingStatus:   PingStatusUnknown,
 	}
 
 	if net.ParseIP(clientIP) != nil && net.ParseIP(clientIP).To4() != nil {

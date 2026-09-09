@@ -419,13 +419,24 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 		if !device.Persistent && existing.Persistent {
 			device.Persistent = true
 		}
+		if device.LastDNSQuery.IsZero() && !existing.LastDNSQuery.IsZero() {
+			device.LastDNSQuery = existing.LastDNSQuery
+		}
+		// Ping results are owned by ProbeReachability, not discovery.
+		device.Online = existing.Online
+		device.PingStatus = existing.PingStatus
+		device.LastPing = existing.LastPing
+		device.PingRTTMs = existing.PingRTTMs
 	} else {
 		if device.FirstSeen.IsZero() {
 			device.FirstSeen = now
 		}
+		if device.PingStatus == "" {
+			device.PingStatus = PingStatusUnknown
+		}
+		device.Online = false
 	}
 	device.LastSeen = now
-	device.Online = true
 
 	// Derive DNS name if not set
 	if device.DNSName == "" {
@@ -480,7 +491,6 @@ func (ds *DeviceStore) UpdateDeviceIP(id string, ipv4 string, ipv6 string) {
 	}
 	if changed {
 		device.LastSeen = time.Now()
-		device.Online = true
 		ds.rebuildIndexes()
 		ds.scheduleSave()
 	}
@@ -508,8 +518,9 @@ func (ds *DeviceStore) ClearDeviceAddress(id string, clearIPv4, clearIPv6 bool) 
 	ds.scheduleSave()
 }
 
-// TouchDevice updates the LastSeen timestamp for a device.
-// Used by passive discovery when we see a query from a known device.
+// TouchDevice updates LastSeen and LastDNSQuery for a device.
+// Used by passive discovery when we see a DNS query from a known device.
+// Does not change ping-based Online status.
 func (ds *DeviceStore) TouchDevice(id string) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
@@ -518,18 +529,23 @@ func (ds *DeviceStore) TouchDevice(id string) {
 	if device == nil {
 		return
 	}
-	device.LastSeen = time.Now()
-	device.Online = true
+	now := time.Now()
+	device.LastSeen = now
+	device.LastDNSQuery = now
 }
 
-// MarkOffline sets devices that haven't been seen recently to offline.
-// Should be called periodically (e.g., every minute).
+// MarkOffline is retained for tests and older callers. Online is now
+// ping-based; this only clears Online when LastSeen is older than threshold
+// and the device has never been probed.
 func (ds *DeviceStore) MarkOffline(threshold time.Duration) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
 	cutoff := time.Now().Add(-threshold)
 	for _, device := range ds.devices {
+		if device.PingStatus != "" && device.PingStatus != PingStatusUnknown {
+			continue
+		}
 		if device.LastSeen.Before(cutoff) {
 			device.Online = false
 		}
@@ -575,6 +591,7 @@ func (ds *DeviceStore) ImportLegacyRecords(records map[string]string) int {
 				Sources:    []DiscoverySource{SourceManual},
 				FirstSeen:  time.Now(),
 				LastSeen:   time.Now(),
+				PingStatus: PingStatusUnknown,
 				Persistent: true,
 			}
 			if net.ParseIP(ip) != nil && net.ParseIP(ip).To4() != nil {

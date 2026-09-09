@@ -665,11 +665,17 @@ func RegisterEndpointsStartServer(
 
 	// Device inventory endpoints
 	log.Println("Registering device API endpoints...")
+	internalServer.Post("/api/devices/probe", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDevicesProbe(w, r)
+	})
 	internalServer.Get("/api/devices", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDevicesGetAll(w, r)
 	})
 	internalServer.Get("/api/devices/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDeviceGet(w, r)
+	})
+	internalServer.Post("/api/devices/{id}/probe", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceProbe(w, r)
 	})
 	internalServer.Post("/api/devices/{id}/name", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDeviceSetName(w, r)

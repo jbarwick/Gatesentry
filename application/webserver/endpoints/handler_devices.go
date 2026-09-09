@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"time"
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
@@ -21,26 +20,68 @@ func deviceStoreOrError(w http.ResponseWriter) *discovery.DeviceStore {
 	return ds
 }
 
+func writeDevicesJSON(w http.ResponseWriter, status int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
 // GSApiDevicesGetAll returns all devices in the inventory.
 // GET /api/devices
-func GSApiDevicesGetAll(w http.ResponseWriter, r *http.Request) {
+func GSApiDevicesGetAll(w http.ResponseWriter, _ *http.Request) {
 	ds := deviceStoreOrError(w)
 	if ds == nil {
 		return
 	}
 
 	devices := ds.GetAllDevices()
-
-	// Mark stale devices as offline (5-minute threshold)
-	ds.MarkOffline(5 * time.Minute)
-
-	// Re-fetch after marking offline so Online flags are current
-	devices = ds.GetAllDevices()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeDevicesJSON(w, http.StatusOK, map[string]interface{}{
 		"devices": devices,
 		"count":   len(devices),
+	})
+}
+
+// GSApiDevicesProbe pings all devices and returns the updated inventory.
+// POST /api/devices/probe
+func GSApiDevicesProbe(w http.ResponseWriter, r *http.Request) {
+	ds := deviceStoreOrError(w)
+	if ds == nil {
+		return
+	}
+
+	summary := ds.ProbeReachability(r.Context())
+	devices := ds.GetAllDevices()
+	writeDevicesJSON(w, http.StatusOK, map[string]interface{}{
+		"devices":        devices,
+		"count":          len(devices),
+		"ping_available": summary.Available,
+		"probed":         summary.Probed,
+		"online":         summary.Online,
+	})
+}
+
+// GSApiDeviceProbe pings a single device and returns it.
+// POST /api/devices/{id}/probe
+func GSApiDeviceProbe(w http.ResponseWriter, r *http.Request) {
+	ds := deviceStoreOrError(w)
+	if ds == nil {
+		return
+	}
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	device := ds.ProbeDevice(r.Context(), id)
+	if device == nil {
+		writeDevicesJSON(w, http.StatusNotFound, map[string]string{"error": "Device not found"})
+		return
+	}
+
+	writeDevicesJSON(w, http.StatusOK, map[string]interface{}{
+		"device":         device,
+		"ping_available": discovery.PingSupported(),
 	})
 }
 
@@ -61,8 +102,7 @@ func GSApiDeviceGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeDevicesJSON(w, http.StatusOK, map[string]interface{}{
 		"device": device,
 	})
 }
@@ -113,8 +153,7 @@ func GSApiDeviceSetName(w http.ResponseWriter, r *http.Request) {
 
 	// Return updated device
 	updated := ds.GetDevice(id)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeDevicesJSON(w, http.StatusOK, map[string]interface{}{
 		"device": updated,
 	})
 }
@@ -140,8 +179,7 @@ func GSApiDeviceDelete(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Devices API] Device %s (%s) removed", id, device.GetDisplayName())
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeDevicesJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Device removed",
 	})
 }

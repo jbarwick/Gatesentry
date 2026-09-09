@@ -11,6 +11,7 @@
   import DeviceDetail from "./devicedetail.svelte";
 
   const API_BASE = getBasePath() + "/api/devices";
+  const DNS_RECENT_MS = 5 * 60 * 1000;
 
   interface Device {
     id: string;
@@ -26,17 +27,26 @@
     sources: string[];
     first_seen: string;
     last_seen: string;
+    last_dns_query: string;
+    last_ping: string;
+    ping_status: string;
+    ping_rtt_ms: number;
     online: boolean;
     owner: string;
     category: string;
     persistent: boolean;
+    macs_display?: string;
+    last_seen_display?: string;
+    last_dns_display?: string;
   }
 
   let devices: Device[] = [];
   let search = "";
   let loading = false;
+  let probing = false;
   let error = "";
   let success = "";
+  let pingAvailable: boolean | null = null;
   let selectedDevice: Device | null = null;
   let detailOpen = false;
   let refreshInterval: ReturnType<typeof setInterval>;
@@ -78,19 +88,61 @@
     }
   }
 
-  function formatDevice(d: Device): Device & Record<string, any> {
+  async function probeDevices() {
+    probing = true;
+    error = "";
+    try {
+      const token = getToken();
+      if (!token) {
+        throw new Error("Please login first to view devices");
+      }
+      const response = await fetch(`${API_BASE}/probe`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.status === 401) {
+        throw new Error("Authentication failed. Please login again");
+      }
+      if (response.status === 503) {
+        devices = [];
+        return;
+      }
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to ping devices: ${response.status} - ${errorText}`,
+        );
+      }
+      const data = await response.json();
+      pingAvailable = data.ping_available !== false;
+      devices = (data.devices || []).map(formatDevice);
+    } catch (err) {
+      error = err.message;
+    } finally {
+      probing = false;
+    }
+  }
+
+  async function refreshAll() {
+    await loadDevices();
+    await probeDevices();
+  }
+
+  function formatDevice(d: Device): Device {
     return {
       ...d,
-      id: d.id,
       display_name: d.manual_name || d.display_name || d.dns_name || "Unknown",
       macs_display: d.macs?.length ? d.macs[0] : "",
       last_seen_display: formatTimeAgo(d.last_seen),
+      last_dns_display: formatTimeAgo(d.last_dns_query),
+      ping_status: d.ping_status || (d.online ? "online" : "unknown"),
     };
   }
 
   function formatTimeAgo(isoDate: string): string {
-    if (!isoDate) return "Never";
+    if (!isoDate || isoDate.startsWith("0001-")) return "Never";
     const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) return "Never";
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffSec = Math.floor(diffMs / 1000);
@@ -103,12 +155,50 @@
     return `${diffDay}d ago`;
   }
 
-  function sourceTagType(s: string): string {
+  function isDnsRecent(isoDate: string): boolean {
+    if (!isoDate || isoDate.startsWith("0001-")) return false;
+    const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) return false;
+    return Date.now() - date.getTime() < DNS_RECENT_MS;
+  }
+
+  function pingLabel(status: string): string {
+    if (status === "online") return "Online — responds to ping";
+    if (status === "offline") return "Offline — ping failed";
+    return "Unknown — not pinged yet, or no IP";
+  }
+
+  type TagType =
+    | "red"
+    | "magenta"
+    | "purple"
+    | "blue"
+    | "cyan"
+    | "teal"
+    | "green"
+    | "gray"
+    | "cool-gray"
+    | "warm-gray"
+    | "high-contrast"
+    | "outline";
+
+  function sourceTagType(s: string): TagType {
     if (s === "ddns") return "green";
     if (s === "mdns") return "blue";
     if (s === "passive") return "warm-gray";
     if (s === "manual") return "purple";
     return "gray";
+  }
+
+  function dnsTagType(dev: Device): TagType {
+    if (!dev.last_dns_query || dev.last_dns_display === "Never") return "outline";
+    if (isDnsRecent(dev.last_dns_query)) return "teal";
+    return "gray";
+  }
+
+  function dnsTagText(dev: Device): string {
+    if (!dev.last_dns_query || dev.last_dns_display === "Never") return "No queries";
+    return `Queried ${dev.last_dns_display}`;
   }
 
   function openDetail(device: Device) {
@@ -124,24 +214,10 @@
     await loadDevices();
   }
 
-  async function removeDevice(device: Device) {
-    if (!confirm(`Remove "${device.display_name}" from the inventory?`)) return;
-    try {
-      const token = getToken();
-      const response = await fetch(`${API_BASE}/${device.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to remove device: ${errorText}`);
-      }
-      success = `"${device.display_name}" removed`;
-      setTimeout(() => (success = ""), 3000);
-      await loadDevices();
-    } catch (err) {
-      error = err.message;
-    }
+  async function handleDeviceProbed(event: CustomEvent<Device>) {
+    const updated = formatDevice(event.detail);
+    devices = devices.map((d) => (d.id === updated.id ? updated : d));
+    selectedDevice = updated;
   }
 
   $: filtered = search
@@ -159,10 +235,15 @@
       })
     : devices;
 
-  $: onlineCount = devices.filter((d) => d.online).length;
+  $: onlineCount = devices.filter((d) => d.ping_status === "online").length;
+  $: dnsRecentCount = devices.filter((d) => isDnsRecent(d.last_dns_query)).length;
+  $: quietOnlineCount = devices.filter(
+    (d) => d.ping_status !== "online" && isDnsRecent(d.last_dns_query),
+  ).length;
 
-  onMount(() => {
-    loadDevices();
+  onMount(async () => {
+    await loadDevices();
+    await probeDevices();
     refreshInterval = setInterval(loadDevices, 30000);
   });
 
@@ -193,18 +274,55 @@
   </div>
 {/if}
 
+{#if pingAvailable === false}
+  <div class="dl-notice">
+    <InlineNotification
+      kind="warning"
+      title="Ping unavailable"
+      subtitle="This environment cannot send ICMP pings. Devices stay Unknown; use DNS activity to see which hosts are using the network."
+      on:close={() => (pingAvailable = null)}
+    />
+  </div>
+{/if}
+
 <div class="dl-toolbar">
   <div class="dl-search">
     <Search bind:value={search} placeholder="Search devices…" size="sm" />
   </div>
-  <button class="dl-refresh" on:click={loadDevices} title="Refresh">
+  <button
+    class="dl-refresh"
+    class:dl-refresh-spin={probing}
+    on:click={refreshAll}
+    title="Refresh and ping devices"
+    disabled={probing}
+  >
     <Renew size={20} />
   </button>
+</div>
+
+<div class="dl-legend">
+  <span class="dl-legend-item"
+    ><span class="dl-dot dl-online"></span> Online (ping)</span
+  >
+  <span class="dl-legend-item"
+    ><span class="dl-dot dl-offline"></span> Offline (ping failed)</span
+  >
+  <span class="dl-legend-item"
+    ><span class="dl-dot dl-unknown"></span> Unknown</span
+  >
+  <span class="dl-legend-item"
+    >Query tag = last DNS request this device sent to GateSentry</span
+  >
 </div>
 
 {#if loading && devices.length === 0}
   <InlineLoading description="Loading devices…" />
 {:else}
+  {#if probing}
+    <div class="dl-probe-status">
+      <InlineLoading description="Pinging devices…" />
+    </div>
+  {/if}
   <div class="gs-card-flush">
     <div class="gs-row-list">
       {#if filtered.length === 0}
@@ -222,8 +340,12 @@
           <div class="dl-desktop">
             <span
               class="dl-dot"
-              class:dl-online={dev.online}
-              class:dl-offline={!dev.online}
+              class:dl-online={dev.ping_status === "online"}
+              class:dl-offline={dev.ping_status === "offline"}
+              class:dl-unknown={dev.ping_status !== "online" &&
+                dev.ping_status !== "offline"}
+              class:dl-probing={probing}
+              title={pingLabel(dev.ping_status)}
             ></span>
             <span class="dl-name">
               {dev.display_name}
@@ -237,7 +359,12 @@
               ><Tag size="sm" type={sourceTagType(dev.source)}>{dev.source}</Tag
               ></span
             >
-            <span class="dl-seen">{dev.last_seen_display}</span>
+            <span class="dl-dns">
+              <Tag size="sm" type={dnsTagType(dev)}>{dnsTagText(dev)}</Tag>
+            </span>
+            <span class="dl-seen" title="Last seen (any discovery)"
+              >{dev.last_seen_display}</span
+            >
           </div>
           <!-- Mobile layout -->
           <div class="dl-mobile">
@@ -245,8 +372,12 @@
               <span class="dl-mob-name">
                 <span
                   class="dl-dot"
-                  class:dl-online={dev.online}
-                  class:dl-offline={!dev.online}
+                  class:dl-online={dev.ping_status === "online"}
+                  class:dl-offline={dev.ping_status === "offline"}
+                  class:dl-unknown={dev.ping_status !== "online" &&
+                    dev.ping_status !== "offline"}
+                  class:dl-probing={probing}
+                  title={pingLabel(dev.ping_status)}
                 ></span>
                 {dev.display_name}
               </span>
@@ -260,6 +391,7 @@
               {/if}
             </div>
             <div class="dl-mob-bottom">
+              <Tag size="sm" type={dnsTagType(dev)}>{dnsTagText(dev)}</Tag>
               <span class="dl-seen">{dev.last_seen_display}</span>
             </div>
           </div>
@@ -276,7 +408,8 @@
     <span class="gs-info-icon">i</span>
     <p>
       {devices.length} device{devices.length !== 1 ? "s" : ""} discovered · {onlineCount}
-      online
+      online · {dnsRecentCount} queried recently{#if quietOnlineCount}
+        · {quietOnlineCount} quiet (no ping, recent query){/if}
     </p>
   </div>
 {/if}
@@ -285,11 +418,13 @@
   <DeviceDetail
     device={selectedDevice}
     open={detailOpen}
+    {pingAvailable}
     on:close={() => {
       detailOpen = false;
       selectedDevice = null;
     }}
     on:saved={handleNameSaved}
+    on:probed={handleDeviceProbed}
   />
 {/if}
 
@@ -305,7 +440,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
   }
   .dl-search {
     flex: 1;
@@ -324,8 +459,38 @@
     color: #525252;
     flex-shrink: 0;
   }
-  .dl-refresh:hover {
+  .dl-refresh:hover:not(:disabled) {
     background: #e5e5e5;
+  }
+  .dl-refresh:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .dl-refresh-spin :global(svg) {
+    animation: dl-spin 1s linear infinite;
+  }
+  @keyframes dl-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .dl-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+    font-size: 0.75rem;
+    color: #6f6f6f;
+    margin-bottom: 0.75rem;
+  }
+  .dl-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .dl-probe-status {
+    margin-bottom: 0.5rem;
   }
 
   /* Row as a button */
@@ -340,19 +505,36 @@
     background: #f4f4f4 !important;
   }
 
-  /* Status dot */
+  /* Status dot — ping reachability */
   .dl-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
+    box-sizing: border-box;
   }
   .dl-online {
     background-color: #24a148;
   }
   .dl-offline {
-    background-color: #c6c6c6;
+    background-color: #8d8d8d;
+  }
+  .dl-unknown {
+    background-color: transparent;
+    border: 2px solid #c6c6c6;
+  }
+  .dl-probing {
+    animation: dl-pulse 1s ease-in-out infinite;
+  }
+  @keyframes dl-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
   }
 
   /* Desktop row */
@@ -389,6 +571,10 @@
   }
   .dl-source {
     width: 70px;
+    flex-shrink: 0;
+  }
+  .dl-dns {
+    width: 110px;
     flex-shrink: 0;
   }
   .dl-seen {
@@ -445,11 +631,15 @@
     color: #a8a8a8;
   }
   .dl-mob-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     width: 100%;
+    gap: 8px;
   }
   .dl-mob-bottom .dl-seen {
     width: auto;
-    text-align: left;
+    text-align: right;
   }
 
   /* ── Mobile ── */

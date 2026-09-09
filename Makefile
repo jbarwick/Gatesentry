@@ -15,7 +15,7 @@ lint:
 	@echo "=== Linting root module ==="
 	golangci-lint run .
 	@echo "=== Linting shell scripts ==="
-	shellcheck -S warning build.sh run.sh restart.sh docker-publish.sh scripts/*.sh || true
+	shellcheck -S warning build.sh release.sh deploy.sh run.sh restart.sh docker-publish.sh scripts/*.sh || true
 	@echo "=== All linting complete ==="
 
 # Run only security-focused linters (fast, good pre-commit check)

@@ -49,25 +49,26 @@ func (ds *DeviceStore) SetPersistPath(filePath string) {
 }
 
 // persistedDevice is the JSON-serializable subset of Device that we save.
-// We include all identity and network fields, but omit transient state
-// like Online (which is recalculated from LastSeen on startup).
+// We include all identity and network fields, but omit transient ping
+// state (Online / PingStatus), which is probed when the devices page opens.
 type persistedDevice struct {
-	ID          string            `json:"id"`
-	DisplayName string            `json:"display_name"`
-	DNSName     string            `json:"dns_name"`
-	Hostnames   []string          `json:"hostnames,omitempty"`
-	MDNSNames   []string          `json:"mdns_names,omitempty"`
-	MACs        []string          `json:"macs,omitempty"`
-	IPv4        string            `json:"ipv4,omitempty"`
-	IPv6        string            `json:"ipv6,omitempty"`
-	Source      DiscoverySource   `json:"source"`
-	Sources     []DiscoverySource `json:"sources,omitempty"`
-	FirstSeen   time.Time         `json:"first_seen"`
-	LastSeen    time.Time         `json:"last_seen"`
-	ManualName  string            `json:"manual_name,omitempty"`
-	Owner       string            `json:"owner,omitempty"`
-	Category    string            `json:"category,omitempty"`
-	Persistent  bool              `json:"persistent"`
+	ID           string            `json:"id"`
+	DisplayName  string            `json:"display_name"`
+	DNSName      string            `json:"dns_name"`
+	Hostnames    []string          `json:"hostnames,omitempty"`
+	MDNSNames    []string          `json:"mdns_names,omitempty"`
+	MACs         []string          `json:"macs,omitempty"`
+	IPv4         string            `json:"ipv4,omitempty"`
+	IPv6         string            `json:"ipv6,omitempty"`
+	Source       DiscoverySource   `json:"source"`
+	Sources      []DiscoverySource `json:"sources,omitempty"`
+	FirstSeen    time.Time         `json:"first_seen"`
+	LastSeen     time.Time         `json:"last_seen"`
+	LastDNSQuery time.Time         `json:"last_dns_query,omitempty"`
+	ManualName   string            `json:"manual_name,omitempty"`
+	Owner        string            `json:"owner,omitempty"`
+	Category     string            `json:"category,omitempty"`
+	Persistent   bool              `json:"persistent"`
 }
 
 // persistedStore is the top-level JSON structure written to disk.
@@ -119,22 +120,23 @@ func (ds *DeviceStore) saveToDisk() error {
 			continue
 		}
 		devices = append(devices, persistedDevice{
-			ID:          d.ID,
-			DisplayName: d.DisplayName,
-			DNSName:     d.DNSName,
-			Hostnames:   d.Hostnames,
-			MDNSNames:   d.MDNSNames,
-			MACs:        d.MACs,
-			IPv4:        d.IPv4,
-			IPv6:        d.IPv6,
-			Source:      d.Source,
-			Sources:     d.Sources,
-			FirstSeen:   d.FirstSeen,
-			LastSeen:    d.LastSeen,
-			ManualName:  d.ManualName,
-			Owner:       d.Owner,
-			Category:    d.Category,
-			Persistent:  d.Persistent,
+			ID:           d.ID,
+			DisplayName:  d.DisplayName,
+			DNSName:      d.DNSName,
+			Hostnames:    d.Hostnames,
+			MDNSNames:    d.MDNSNames,
+			MACs:         d.MACs,
+			IPv4:         d.IPv4,
+			IPv6:         d.IPv6,
+			Source:       d.Source,
+			Sources:      d.Sources,
+			FirstSeen:    d.FirstSeen,
+			LastSeen:     d.LastSeen,
+			LastDNSQuery: d.LastDNSQuery,
+			ManualName:   d.ManualName,
+			Owner:        d.Owner,
+			Category:     d.Category,
+			Persistent:   d.Persistent,
 		})
 	}
 	ds.mu.RUnlock()
@@ -209,23 +211,25 @@ func (ds *DeviceStore) loadFromDisk() error {
 		}
 
 		d := &Device{
-			ID:          pd.ID,
-			DisplayName: pd.DisplayName,
-			DNSName:     pd.DNSName,
-			Hostnames:   pd.Hostnames,
-			MDNSNames:   pd.MDNSNames,
-			MACs:        pd.MACs,
-			IPv4:        pd.IPv4,
-			IPv6:        pd.IPv6,
-			Source:      pd.Source,
-			Sources:     pd.Sources,
-			FirstSeen:   pd.FirstSeen,
-			LastSeen:    pd.LastSeen,
-			ManualName:  pd.ManualName,
-			Owner:       pd.Owner,
-			Category:    pd.Category,
-			Persistent:  pd.Persistent,
-			Online:      false, // will be updated by MarkOffline or next observation
+			ID:           pd.ID,
+			DisplayName:  pd.DisplayName,
+			DNSName:      pd.DNSName,
+			Hostnames:    pd.Hostnames,
+			MDNSNames:    pd.MDNSNames,
+			MACs:         pd.MACs,
+			IPv4:         pd.IPv4,
+			IPv6:         pd.IPv6,
+			Source:       pd.Source,
+			Sources:      pd.Sources,
+			FirstSeen:    pd.FirstSeen,
+			LastSeen:     pd.LastSeen,
+			LastDNSQuery: pd.LastDNSQuery,
+			ManualName:   pd.ManualName,
+			Owner:        pd.Owner,
+			Category:     pd.Category,
+			Persistent:   pd.Persistent,
+			Online:       false,
+			PingStatus:   PingStatusUnknown,
 		}
 		ds.devices[d.ID] = d
 		loaded++
