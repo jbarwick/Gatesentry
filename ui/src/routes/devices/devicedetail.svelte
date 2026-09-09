@@ -219,183 +219,185 @@
       >
     </div>
 
-    {#if detailTab === "reach"}
-      <div class="tab-toolbar">
-        <Button
-          kind="tertiary"
-          size="small"
-          disabled={pinging || noIp}
-          on:click={pingNow}
-        >
-          {pinging ? "Pinging…" : "Ping now"}
-        </Button>
-      </div>
-      <div class="dd-list">
-        <div class="dd-row">
-          <div class="dd-label">Online / offline</div>
-          <div class="dd-value">
-            <span class="status-dot {pingStatus}"></span>
-            {pingLabel}
-            {#if pingStatus === "online" && device?.ping_rtt_ms}
-              <span class="muted">{device.ping_rtt_ms} ms</span>
-            {/if}
+    <div class="dd-panels">
+      <div class="dd-panel" class:active={detailTab === "reach"}>
+        <div class="tab-toolbar">
+          <Button
+            kind="tertiary"
+            size="small"
+            disabled={pinging || noIp}
+            on:click={pingNow}
+          >
+            {pinging ? "Pinging…" : "Ping now"}
+          </Button>
+        </div>
+        <div class="dd-list">
+          <div class="dd-row">
+            <div class="dd-label">Online / offline</div>
+            <div class="dd-value">
+              <span class="status-dot {pingStatus}"></span>
+              {pingLabel}
+              {#if pingStatus === "online" && device?.ping_rtt_ms}
+                <span class="muted">{device.ping_rtt_ms} ms</span>
+              {/if}
+            </div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">Last ping</div>
+            <div class="dd-value">
+              {when(device?.last_ping).abs}
+              {#if when(device?.last_ping).rel}
+                <span class="muted">{when(device?.last_ping).rel}</span>
+              {/if}
+            </div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">Address probed</div>
+            <div class="dd-value mono">{device?.ipv4 || device?.ipv6 || "—"}</div>
           </div>
         </div>
-        <div class="dd-row">
-          <div class="dd-label">Last ping</div>
-          <div class="dd-value">
-            {when(device?.last_ping).abs}
-            {#if when(device?.last_ping).rel}
-              <span class="muted">{when(device?.last_ping).rel}</span>
-            {/if}
+        {#if noIp}
+          <p class="hint">No IP address is known, so this device cannot be pinged.</p>
+        {:else if pingAvailable === false}
+          <p class="hint">Ping is not available in this environment. Status stays unknown.</p>
+        {:else if pingOfflineButDns}
+          <p class="hint">
+            Ping failed, but this device has queried DNS — many phones and IoT
+            devices ignore ICMP.
+          </p>
+        {:else if pingStatus === "offline"}
+          <p class="hint">
+            Ping failed. The device may be off, on another network, or blocking ICMP.
+          </p>
+        {/if}
+      </div>
+
+      <div class="dd-panel" class:active={detailTab === "dns"}>
+        <div class="dd-list">
+          <div class="dd-row">
+            <div class="dd-label">Status</div>
+            <div class="dd-value">
+              <Tag
+                size="sm"
+                type={dnsActivityLabel() === "Active"
+                  ? "teal"
+                  : dnsActivityLabel() === "Quiet"
+                    ? "gray"
+                    : "outline"}>{dnsActivityLabel()}</Tag
+              >
+            </div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">Last DNS query</div>
+            <div class="dd-value">
+              {when(device?.last_dns_query).abs}
+              {#if when(device?.last_dns_query).rel}
+                <span class="muted">{when(device?.last_dns_query).rel}</span>
+              {/if}
+            </div>
           </div>
         </div>
-        <div class="dd-row">
-          <div class="dd-label">Address probed</div>
-          <div class="dd-value mono">{device?.ipv4 || device?.ipv6 || "—"}</div>
-        </div>
-      </div>
-      {#if noIp}
-        <p class="hint">No IP address is known, so this device cannot be pinged.</p>
-      {:else if pingAvailable === false}
-        <p class="hint">Ping is not available in this environment. Status stays unknown.</p>
-      {:else if pingOfflineButDns}
         <p class="hint">
-          Ping failed, but this device has queried DNS — many phones and IoT
-          devices ignore ICMP.
+          Last time this device asked GateSentry to resolve a name. An IP or local
+          DNS record is not a query. A quiet device can still be online.
         </p>
-      {:else if pingStatus === "offline"}
-        <p class="hint">
-          Ping failed. The device may be off, on another network, or blocking ICMP.
-        </p>
-      {/if}
-    {/if}
+      </div>
 
-    {#if detailTab === "dns"}
-      <div class="dd-list">
-        <div class="dd-row">
-          <div class="dd-label">Status</div>
-          <div class="dd-value">
-            <Tag
-              size="sm"
-              type={dnsActivityLabel() === "Active"
-                ? "teal"
-                : dnsActivityLabel() === "Quiet"
-                  ? "gray"
-                  : "outline"}>{dnsActivityLabel()}</Tag
-            >
+      <div class="dd-panel" class:active={detailTab === "id"}>
+        <div class="dd-list">
+          <div class="dd-row">
+            <div class="dd-label">DNS name</div>
+            <div class="dd-value">{device?.dns_name || "—"}</div>
           </div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">Last DNS query</div>
-          <div class="dd-value">
-            {when(device?.last_dns_query).abs}
-            {#if when(device?.last_dns_query).rel}
-              <span class="muted">{when(device?.last_dns_query).rel}</span>
-            {/if}
+          <div class="dd-row">
+            <div class="dd-label">Hostnames</div>
+            <div class="dd-value tags">
+              {#if device?.hostnames?.length}
+                {#each device.hostnames as h}
+                  <Tag size="sm" type="outline">{h}</Tag>
+                {/each}
+              {:else}
+                —
+              {/if}
+            </div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">mDNS names</div>
+            <div class="dd-value tags">
+              {#if device?.mdns_names?.length}
+                {#each device.mdns_names as m}
+                  <Tag size="sm" type="blue">{m}</Tag>
+                {/each}
+              {:else}
+                —
+              {/if}
+            </div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">IPv4</div>
+            <div class="dd-value mono">{device?.ipv4 || "—"}</div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">IPv6</div>
+            <div class="dd-value mono wrap">{device?.ipv6 || "—"}</div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">MAC address</div>
+            <div class="dd-value tags">
+              {#if device?.macs?.length}
+                {#each device.macs as mac}
+                  <Tag size="sm" type="warm-gray">{mac}</Tag>
+                {/each}
+              {:else}
+                —
+              {/if}
+            </div>
           </div>
         </div>
       </div>
-      <p class="hint">
-        Last time this device asked GateSentry to resolve a name. An IP or local
-        DNS record is not a query. A quiet device can still be online.
-      </p>
-    {/if}
 
-    {#if detailTab === "id"}
-      <div class="dd-list">
-        <div class="dd-row">
-          <div class="dd-label">DNS name</div>
-          <div class="dd-value">{device?.dns_name || "—"}</div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">Hostnames</div>
-          <div class="dd-value tags">
-            {#if device?.hostnames?.length}
-              {#each device.hostnames as h}
-                <Tag size="sm" type="outline">{h}</Tag>
-              {/each}
-            {:else}
-              —
-            {/if}
+      <div class="dd-panel" class:active={detailTab === "disc"}>
+        <div class="dd-list">
+          <div class="dd-row">
+            <div class="dd-label">Primary source</div>
+            <div class="dd-value">
+              <Tag size="sm" type={sourceTagType(device?.source)}
+                >{device?.source || "—"}</Tag
+              >
+            </div>
           </div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">mDNS names</div>
-          <div class="dd-value tags">
-            {#if device?.mdns_names?.length}
-              {#each device.mdns_names as m}
-                <Tag size="sm" type="blue">{m}</Tag>
-              {/each}
-            {:else}
-              —
-            {/if}
+          <div class="dd-row">
+            <div class="dd-label">All sources</div>
+            <div class="dd-value tags">
+              {#if device?.sources?.length}
+                {#each device.sources as s}
+                  <Tag size="sm" type="outline">{s}</Tag>
+                {/each}
+              {:else}
+                —
+              {/if}
+            </div>
           </div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">IPv4</div>
-          <div class="dd-value mono">{device?.ipv4 || "—"}</div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">IPv6</div>
-          <div class="dd-value mono wrap">{device?.ipv6 || "—"}</div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">MAC address</div>
-          <div class="dd-value tags">
-            {#if device?.macs?.length}
-              {#each device.macs as mac}
-                <Tag size="sm" type="warm-gray">{mac}</Tag>
-              {/each}
-            {:else}
-              —
-            {/if}
+          <div class="dd-row">
+            <div class="dd-label">First seen</div>
+            <div class="dd-value">{when(device?.first_seen).abs}</div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">Last seen</div>
+            <div class="dd-value">
+              {when(device?.last_seen).abs}
+              {#if when(device?.last_seen).rel}
+                <span class="muted">{when(device?.last_seen).rel}</span>
+              {/if}
+            </div>
+          </div>
+          <div class="dd-row">
+            <div class="dd-label">Device ID</div>
+            <div class="dd-value mono wrap">{device?.id || "—"}</div>
           </div>
         </div>
       </div>
-    {/if}
-
-    {#if detailTab === "disc"}
-      <div class="dd-list">
-        <div class="dd-row">
-          <div class="dd-label">Primary source</div>
-          <div class="dd-value">
-            <Tag size="sm" type={sourceTagType(device?.source)}
-              >{device?.source || "—"}</Tag
-            >
-          </div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">All sources</div>
-          <div class="dd-value tags">
-            {#if device?.sources?.length}
-              {#each device.sources as s}
-                <Tag size="sm" type="outline">{s}</Tag>
-              {/each}
-            {:else}
-              —
-            {/if}
-          </div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">First seen</div>
-          <div class="dd-value">{when(device?.first_seen).abs}</div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">Last seen</div>
-          <div class="dd-value">
-            {when(device?.last_seen).abs}
-            {#if when(device?.last_seen).rel}
-              <span class="muted">{when(device?.last_seen).rel}</span>
-            {/if}
-          </div>
-        </div>
-        <div class="dd-row">
-          <div class="dd-label">Device ID</div>
-          <div class="dd-value mono wrap">{device?.id || "—"}</div>
-        </div>
-      </div>
-    {/if}
+    </div>
   </ModalBody>
   <ModalFooter
     primaryButtonText={saving ? "Saving..." : "Save"}
@@ -415,10 +417,23 @@
   .dd-tabs {
     margin: 0.5rem 0 0.75rem 0;
   }
+  .dd-panels {
+    display: grid;
+  }
+  .dd-panel {
+    grid-area: 1 / 1;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .dd-panel.active {
+    visibility: visible;
+    pointer-events: auto;
+  }
   .tab-toolbar {
     display: flex;
     justify-content: flex-end;
     margin-bottom: 0.5rem;
+    min-height: 2rem;
   }
   .dd-list {
     display: flex;

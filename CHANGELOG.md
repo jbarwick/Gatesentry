@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v2.0.0-beta.12 (9 September 2026)
+
+- Device details tabs keep a fixed height so the dialog does not resize when switching tabs
+
 ## v2.0.0-beta.11 (9 September 2026)
 
 - Device details dialog: Reachability, DNS queries, Identity, and Discovery on tabs
