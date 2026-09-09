@@ -187,7 +187,7 @@ func replyAuth(w dns.ResponseWriter, req *dns.Msg, answers []dns.RR) {
 
 func noteQuery(domain string, qtype uint16, kind string, blocked bool) {
 	emitRequestEvent(domain, qtypeName(qtype), kind, blocked)
-	if dnsDebug.Load() && logger != nil {
+	if logger != nil {
 		logger.LogDNS(domain, "dns", kind)
 	}
 }

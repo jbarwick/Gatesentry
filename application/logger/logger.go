@@ -17,7 +17,7 @@ var Commit_Interval = time.Second * 60
 
 const (
 	logQueueSize = 256
-	maxLogScan   = 20000
+	maxLogScan   = 20000 // ungrouped live-log views only; stats scans the time window
 )
 
 type logWrite struct {
@@ -337,10 +337,19 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (i
 
 	scanned := 0
 
+	if L.Database == nil {
+		if useGrouping {
+			return logMap, nil
+		}
+		return []LogEntry{}, nil
+	}
+
 	L.Database.View(func(tx *buntdb.Tx) error {
 		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
 			scanned++
-			if scanned > maxLogScan {
+			// Ungrouped views (live log) stay bounded. Stats grouping
+			// must cover the full requested window (up to log TTL, 7 days).
+			if !useGrouping && scanned > maxLogScan {
 				return false
 			}
 			var logEntry LogEntry
@@ -375,4 +384,76 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (i
 		logSlice = []LogEntry{}
 	}
 	return logSlice, nil
+}
+
+// HostBucket is per-URL counts for one time bucket (used by /stats).
+type HostBucket struct {
+	Total int
+	Hosts map[string]int
+}
+
+func (L *Log) addHostCount(dst map[string]HostBucket, bucket, host string) {
+	b := dst[bucket]
+	if b.Hosts == nil {
+		b.Hosts = make(map[string]int)
+	}
+	b.Total++
+	b.Hosts[host]++
+	dst[bucket] = b
+}
+
+// GetHostStats scans the requested window and counts dns/proxy hits per
+// time bucket and host. Used by the stats charts so a 7-day view does not
+// load every log line into memory.
+func (L *Log) GetHostStats(fromSeconds int64, groupByFormat string) (all, blocked map[string]HostBucket, err error) {
+	all = make(map[string]HostBucket)
+	blocked = make(map[string]HostBucket)
+	if L == nil || L.Database == nil {
+		return all, blocked, nil
+	}
+	if groupByFormat == "" {
+		groupByFormat = "2006-01-02"
+	}
+
+	now := time.Now()
+	totime := now.Unix()
+	fromtime := totime - fromSeconds
+	from := gatesentry2utils.Int64toString(fromtime)
+	to := gatesentry2utils.Int64toString(totime)
+
+	err = L.Database.View(func(tx *buntdb.Tx) error {
+		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
+			var logEntry LogEntry
+			if json.Unmarshal([]byte(value), &logEntry) != nil {
+				return true
+			}
+			if logEntry.Type != "dns" && logEntry.Type != "proxy" {
+				return true
+			}
+			host := logEntry.URL
+			if logEntry.Type == "proxy" {
+				host = strings.Replace(host, "http://", "", -1)
+				host = strings.Replace(host, ":443", "", -1)
+			}
+			bucket := time.Unix(logEntry.Time, 0).Local().Format(groupByFormat)
+			L.addHostCount(all, bucket, host)
+			if logEntry.Type == "dns" && logEntry.DNSResponseType == "blocked" {
+				L.addHostCount(blocked, bucket, host)
+			} else if logEntry.Type == "proxy" && isProxyBlocked(logEntry.ProxyResponseType) {
+				L.addHostCount(blocked, bucket, host)
+			}
+			return true
+		})
+	})
+	return all, blocked, err
+}
+
+func isProxyBlocked(action string) bool {
+	switch action {
+	case "blocked_text_content", "blocked_media_content", "blocked_file_type",
+		"blocked_time", "blocked_internet_for_user", "blocked_url":
+		return true
+	default:
+		return false
+	}
 }

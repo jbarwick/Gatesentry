@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { isIPv4, isIPv6 } from "is-ip";
   import ToggleComponent from "../../components/toggle.svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
   import {
@@ -236,16 +235,43 @@
     return (s || "").trim();
   }
 
-  function canSaveHostRecord(): boolean {
+  function isIPv4Addr(s: string): boolean {
+    const t = (s || "").trim();
+    if (!t) return false;
+    const parts = t.split(".");
+    if (parts.length !== 4) return false;
+    return parts.every((p) => {
+      if (!/^(0|[1-9]\d{0,2})$/.test(p)) return false;
+      const n = Number(p);
+      return n >= 0 && n <= 255;
+    });
+  }
+
+  function isIPv6Addr(s: string): boolean {
+    const t = (s || "").trim();
+    if (!t || t.includes(".")) return false;
+    if ((t.match(/:/g) || []).length < 2) return false;
+    if ((t.match(/::/g) || []).length > 1) return false;
+    const hextets = t
+      .split("::")
+      .join(":")
+      .split(":")
+      .filter((h) => h.length > 0);
+    const max = t.includes("::") ? 7 : 8;
+    if (hextets.length > max) return false;
+    return hextets.every((h) => /^[0-9a-fA-F]{1,4}$/.test(h));
+  }
+
+  $: canSaveHostRecord = (() => {
     const name = trimmed(domainText);
     const v4 = trimmed(ipText);
     const v6 = trimmed(ipv6Text);
     if (!name) return false;
     if (!v4 && !v6) return false;
-    if (v4 && !isIPv4(v4)) return false;
-    if (v6 && !isIPv6(v6)) return false;
+    if (v4 && !isIPv4Addr(v4)) return false;
+    if (v6 && !isIPv6Addr(v6)) return false;
     return true;
-  }
+  })();
 
   const loadARecords = () => {
     aRecords = [];
@@ -470,7 +496,7 @@
       />
     </ModalBody>
     <ModalFooter
-      primaryButtonDisabled={!canSaveHostRecord()}
+      primaryButtonDisabled={!canSaveHostRecord}
       primaryButtonIcon={Save}
       primaryButtonText={$_("Save")}
     />

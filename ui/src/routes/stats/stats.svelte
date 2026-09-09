@@ -36,7 +36,7 @@
     { id: "24h", text: "Past 24 hours" },
     { id: "1h", text: "Past hour" },
   ];
-  let selectedScale = "24h";
+  let selectedScale = "7d";
 
   let chart: any = null;
   let chartHolder: HTMLElement;
@@ -255,7 +255,7 @@
     { id: "24h", text: "Past 24 hours" },
     { id: "1h", text: "Past hour" },
   ];
-  let proxySelectedScale = "24h";
+  let proxySelectedScale = "7d";
   let proxySelectedUser = "";
 
   let proxyData: ProxyStatsResponse | null = null;

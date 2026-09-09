@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## v2.0.0-beta.10 (9 September 2026)
+
+- Stats "Past 7 days" scans the full window (not the newest 20k log lines)
+- DNS queries are logged again for charts; stats aggregate during the scan
+- Add A/AAAA Save enables when name plus IPv4 or IPv6 is valid
+
 ## v2.0.0-beta.9 (9 September 2026)
 
 - Custom A/AAAA records on the DNS Server tab (IPv4, IPv6, or both)

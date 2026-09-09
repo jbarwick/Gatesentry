@@ -12,8 +12,8 @@ import (
 // ParseStatsQuery extracts seconds and group from the request query string.
 // Defaults: seconds=604800 (7 days), group="day".
 func ParseStatsQuery(r *http.Request) (seconds int, group string) {
-	seconds = 86400 // 24 hours — a 7-day default scans a huge log.db
-	group = "hour"
+	seconds = 604800 // 7 days — matches the stats "Past 7 days" filter
+	group = "day"
 
 	if s := r.URL.Query().Get("seconds"); s != "" {
 		if v, err := strconv.Atoi(s); err == nil && v > 0 {
@@ -151,30 +151,30 @@ func ApiGetStatsByURL(logger *gatesentryLogger.Log, seconds int, group string) i
 		groupFormat = "2006-01-02"
 	}
 
-	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(seconds), groupFormat)
+	all, blocked, err := logger.GetHostStats(int64(seconds), groupFormat)
 	if err != nil {
 		return struct {
 			Error string `json:"error"`
 		}{Error: "Failed to retrieve logs"}
 	}
 
-	if logEntriesInterface == nil {
-		return HostGroupResponse{
-			ItemsBlocked: make(HostGroupSet),
-			All:          make(HostGroupSet),
-		}
+	return HostGroupResponse{
+		ItemsBlocked: hostBucketsToSet(blocked),
+		All:          hostBucketsToSet(all),
 	}
+}
 
-	switch logs := logEntriesInterface.(type) {
-	case map[string][]gatesentryLogger.LogEntry:
-		return HostGroupResponse{
-			ItemsBlocked: SliceEntries(logs, "blocked"),
-			All:          SliceEntries(logs, "all"),
+func hostBucketsToSet(in map[string]gatesentryLogger.HostBucket) HostGroupSet {
+	out := make(HostGroupSet, len(in))
+	for key, b := range in {
+		grouped := make([]URLGroup, 0, len(b.Hosts))
+		for url, count := range b.Hosts {
+			grouped = append(grouped, URLGroup{URL: url, Count: count})
 		}
-	default:
-		return HostGroupResponse{
-			ItemsBlocked: make(HostGroupSet),
-			All:          make(HostGroupSet),
-		}
+		sort.Slice(grouped, func(i, j int) bool {
+			return grouped[i].Count > grouped[j].Count
+		})
+		out[key] = HostGroupWithTotal{Total: b.Total, Hosts: grouped}
 	}
+	return out
 }
