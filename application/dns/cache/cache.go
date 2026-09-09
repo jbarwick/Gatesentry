@@ -401,8 +401,9 @@ func shardIndex(key string) uint32 {
 }
 
 // computeTTL determines how long to cache a DNS response.
-// Positive responses: minimum TTL across answer + authority records.
-// Negative responses (NXDOMAIN, NODATA): SOA minimum TTL per RFC 2308 §5.
+// Positive responses: minimum TTL of answer + additional (glue), matching
+// what we serve; SOA in Ns is not used (that is for negative caching).
+// Negative responses (NXDOMAIN, NODATA): min(SOA TTL, SOA MINIMUM) per RFC 2308 §5.
 // Result is clamped to [MinTTL, MaxTTL] (or [MinTTL, NegativeTTL] for negatives).
 func (c *DNSCache) computeTTL(msg *dns.Msg) time.Duration {
 	isNegative := msg.Rcode == dns.RcodeNameError || // NXDOMAIN
@@ -412,25 +413,25 @@ func (c *DNSCache) computeTTL(msg *dns.Msg) time.Duration {
 		return c.negativeTTL(msg)
 	}
 
-	// Positive response — find minimum TTL across all records
-	var minTTL uint32 = 0
+	// Positive response: cache for the shortest remaining RR TTL we will
+	// actually serve (answer + additional glue, not the SOA in Ns).
+	var minTTL uint32
 	found := false
-	for _, rr := range msg.Answer {
-		ttl := rr.Header().Ttl
-		if !found || ttl < minTTL {
-			minTTL = ttl
-			found = true
+	consider := func(rrs []dns.RR) {
+		for _, rr := range rrs {
+			if rr.Header().Rrtype == dns.TypeOPT {
+				continue
+			}
+			ttl := rr.Header().Ttl
+			if !found || ttl < minTTL {
+				minTTL = ttl
+				found = true
+			}
 		}
 	}
-	for _, rr := range msg.Ns {
-		ttl := rr.Header().Ttl
-		if !found || ttl < minTTL {
-			minTTL = ttl
-			found = true
-		}
-	}
+	consider(msg.Answer)
+	consider(msg.Extra)
 	if !found {
-		// No records at all — use MinTTL as fallback
 		return c.config.MinTTL
 	}
 

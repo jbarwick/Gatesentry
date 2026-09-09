@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isIPv4 } from "is-ip";
+  import { isIPv4, isIPv6 } from "is-ip";
   import ToggleComponent from "../../components/toggle.svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
   import {
@@ -224,12 +224,28 @@
     await saveAllowListIds();
   }
 
-  // ── Custom A Records (Server tab) ──
+  // ── Custom A/AAAA Records (Server tab) ──
   let aRecords = null;
   let domainText = "";
   let ipText = "";
+  let ipv6Text = "";
   let editingRowId = null;
   let showARecordForm = false;
+
+  function trimmed(s: string): string {
+    return (s || "").trim();
+  }
+
+  function canSaveHostRecord(): boolean {
+    const name = trimmed(domainText);
+    const v4 = trimmed(ipText);
+    const v6 = trimmed(ipv6Text);
+    if (!name) return false;
+    if (!v4 && !v6) return false;
+    if (v4 && !isIPv4(v4)) return false;
+    if (v6 && !isIPv6(v6)) return false;
+    return true;
+  }
 
   const loadARecords = () => {
     aRecords = [];
@@ -244,7 +260,8 @@
   const saveARecords = () => {
     const filteredData = aRecords.map((item) => ({
       domain: item.domain,
-      ip: item.ip,
+      ip: item.ip || "",
+      ipv6: item.ipv6 || "",
     }));
     $store.api
       .doCall("/dns/custom_entries", "post", filteredData, {
@@ -255,13 +272,14 @@
           loadARecords();
           domainText = "";
           ipText = "";
+          ipv6Text = "";
           showARecordForm = false;
           editingRowId = null;
           loadDnsInfo();
           notificationstore.add({
             kind: "success",
             title: $_("Success:"),
-            subtitle: $_("A record saved"),
+            subtitle: $_("Record saved"),
           });
         } else if ("error" in json) {
           notificationstore.add(
@@ -286,13 +304,19 @@
 
   const addOrSaveARecord = () => {
     if (editingRowId) {
-      aRecords[editingRowId - 1].domain = domainText;
-      aRecords[editingRowId - 1].ip = ipText;
+      aRecords[editingRowId - 1].domain = trimmed(domainText);
+      aRecords[editingRowId - 1].ip = trimmed(ipText);
+      aRecords[editingRowId - 1].ipv6 = trimmed(ipv6Text);
       editingRowId = null;
     } else {
       aRecords = [
         ...aRecords,
-        { id: aRecords.length + 1, domain: domainText, ip: ipText },
+        {
+          id: aRecords.length + 1,
+          domain: trimmed(domainText),
+          ip: trimmed(ipText),
+          ipv6: trimmed(ipv6Text),
+        },
       ];
     }
     saveARecords();
@@ -302,7 +326,8 @@
     editingRowId = rowId;
     const row = aRecords.find((r) => r.id === rowId);
     domainText = row.domain;
-    ipText = row.ip;
+    ipText = row.ip || "";
+    ipv6Text = row.ipv6 || "";
     showARecordForm = true;
   };
 
@@ -408,31 +433,44 @@
       showARecordForm = false;
       domainText = "";
       ipText = "";
+      ipv6Text = "";
       editingRowId = null;
     }}
   >
     <ModalHeader
-      title={editingRowId ? $_("Edit A Record") : $_("Add A Record")}
+      title={editingRowId
+        ? $_("Edit A/AAAA Record")
+        : $_("Add A/AAAA Record")}
     />
     <ModalBody hasForm>
       <TextInput
-        labelText={$_("Domain")}
+        labelText={$_("Name")}
         type="text"
         bind:value={domainText}
-        placeholder="domain.com"
+        placeholder="host.example.com"
         size="sm"
       />
       <br />
       <TextInput
         type="text"
         bind:value={ipText}
-        placeholder="1.1.1.1"
+        placeholder="192.0.2.1"
         size="sm"
-        labelText={$_("IP Address")}
+        labelText={$_("IPv4 address")}
+        helperText={$_("Optional if IPv6 is set")}
+      />
+      <br />
+      <TextInput
+        type="text"
+        bind:value={ipv6Text}
+        placeholder="2001:db8::1"
+        size="sm"
+        labelText={$_("IPv6 address")}
+        helperText={$_("Optional if IPv4 is set")}
       />
     </ModalBody>
     <ModalFooter
-      primaryButtonDisabled={!isIPv4(ipText)}
+      primaryButtonDisabled={!canSaveHostRecord()}
       primaryButtonIcon={Save}
       primaryButtonText={$_("Save")}
     />
@@ -677,10 +715,10 @@
     <div class="gs-card">
       <div class="dns-list-header">
         <div>
-          <h5>Custom A Records</h5>
+          <h5>Custom A/AAAA Records</h5>
           <p class="dns-list-hint">
-            Domains listed here resolve to the specified IP address instead of
-            querying upstream DNS.
+            Names listed here resolve locally. Supply an IPv4 address, an IPv6
+            address, or both.
           </p>
         </div>
         <Button
@@ -691,6 +729,7 @@
             editingRowId = null;
             domainText = "";
             ipText = "";
+            ipv6Text = "";
             showARecordForm = true;
           }}
         >
@@ -699,9 +738,9 @@
       </div>
 
       {#if aRecords == null}
-        <InlineLoading description="Loading A records..." />
+        <InlineLoading description="Loading records..." />
       {:else if aRecords.length === 0}
-        <p class="gs-empty">No custom A records.</p>
+        <p class="gs-empty">No custom A/AAAA records.</p>
       {:else}
         <div class="gs-row-list">
           {#each aRecords.sort((a, b) => b.id - a.id) as record (record.id)}
@@ -709,7 +748,12 @@
               <div class="dns-row-info">
                 <span class="dns-row-name">{record.domain}</span>
                 <span class="dns-row-meta">
-                  <code class="dns-ip">{record.ip}</code>
+                  {#if record.ip}
+                    <code class="dns-ip">{record.ip}</code>
+                  {/if}
+                  {#if record.ipv6}
+                    <code class="dns-ip">{record.ipv6}</code>
+                  {/if}
                 </span>
               </div>
               <div class="dns-row-actions">

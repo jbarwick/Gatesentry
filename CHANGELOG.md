@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v2.0.0-beta.9 (9 September 2026)
+
+- Custom A/AAAA records on the DNS Server tab (IPv4, IPv6, or both)
+- DNS query path: custom records first, then filters, then cache/upstream
+- Lock-free custom-record snapshot; AAAA answers packed as 16-byte IPv6
+- Cache positive TTLs from answer/glue (not SOA); remaining TTL served on hits
+
 ## v2.0.0-beta.8 (9 September 2026)
 
 - Admin HTTPS on `GS_ADMIN_PORT_SSL` (default 9877), enabled from Settings above MITM

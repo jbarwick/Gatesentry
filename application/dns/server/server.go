@@ -14,6 +14,7 @@ import (
 
 	dnscache "bitbucket.org/abdullah_irfan/gatesentryf/dns/cache"
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
+	gatesentryDnsFilter "bitbucket.org/abdullah_irfan/gatesentryf/dns/filter"
 	gatesentryDnsScheduler "bitbucket.org/abdullah_irfan/gatesentryf/dns/scheduler"
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
 	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
@@ -66,20 +67,21 @@ var (
 	// RWMutex allows concurrent reads while blocking writes.
 	// Use RLock() for reading blockedDomains/exceptionDomains/internalRecords
 	// Use Lock() when updating these maps (in scheduler/filter initialization)
-	mutex            sync.RWMutex
-	blockedDomains   = make(map[string]bool)
-	exceptionDomains = make(map[string]bool)
-	internalRecords  = make(map[string]string)
-	localIp, _       = gatesentryDnsUtils.GetLocalIP()
-	localIPv6, _     = gatesentryDnsUtils.GetLocalIPv6()
-	localIps         = gatesentryDnsUtils.GetLocalIPs()
-	localIPv6s       = gatesentryDnsUtils.GetLocalIPv6s()
-	queryLogs        = make(map[string][]QueryLog)
-	logMutex         sync.Mutex
-	logsFile         *os.File
-	fileMutex        sync.Mutex
-	logsPath         = "dns_logs.txt"
-	logger           *gatesentryLogger.Log
+	mutex               sync.RWMutex
+	blockedDomains      = make(map[string]bool)
+	exceptionDomains    = make(map[string]bool)
+	internalRecords     = make(map[string]string)
+	internalRecordsAAAA = make(map[string]string)
+	localIp, _          = gatesentryDnsUtils.GetLocalIP()
+	localIPv6, _        = gatesentryDnsUtils.GetLocalIPv6()
+	localIps            = gatesentryDnsUtils.GetLocalIPs()
+	localIPv6s          = gatesentryDnsUtils.GetLocalIPv6s()
+	queryLogs           = make(map[string][]QueryLog)
+	logMutex            sync.Mutex
+	logsFile            *os.File
+	fileMutex           sync.Mutex
+	logsPath            = "dns_logs.txt"
+	logger              *gatesentryLogger.Log
 )
 
 // wpadEnabled controls whether the DNS server intercepts wpad.* queries
@@ -198,6 +200,7 @@ func init() {
 		externalResolver = normalizeResolver(envResolver)
 		log.Printf("[DNS] Using external resolver from environment: %s", externalResolver)
 	}
+	dnsDebug.Store(os.Getenv("GS_DEBUG_LOGGING") == "true")
 }
 
 // GetListenAddr returns the current DNS listen address
@@ -412,10 +415,13 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 
 	restartDnsSchedulerChan = make(chan bool)
 
+	gatesentryDnsFilter.OnCustomRecordsLoaded = ReplaceCustomRecords
+
 	go gatesentryDnsScheduler.RunScheduler(
 		&blockedDomains,
 		&blockedLists,
 		&internalRecords,
+		&internalRecordsAAAA,
 		&exceptionDomains,
 		&mutex,
 		settings,
@@ -646,10 +652,15 @@ func registerApplianceNames(settings *gatesentry2storage.MapStore) {
 	}
 	localIps = gatesentryDnsUtils.GetLocalIPs()
 	localIPv6s = gatesentryDnsUtils.GetLocalIPv6s()
-	if localIp != "" {
+	if localIp != "" || localIPv6 != "" {
 		mutex.Lock()
 		for n := range names {
-			internalRecords[n] = localIp
+			if localIp != "" {
+				internalRecords[n] = localIp
+			}
+			if localIPv6 != "" {
+				internalRecordsAAAA[n] = localIPv6
+			}
 		}
 		mutex.Unlock()
 	}
@@ -746,214 +757,6 @@ func isDomainBlocked(domain string) bool {
 	}
 
 	return true
-}
-
-func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
-	queryStart := time.Now()
-	dnsMetrics.QueriesTotal.Add(1)
-	defer func() { dnsMetrics.QueryDuration.Observe(time.Since(queryStart)) }()
-
-	// Check if server is running (atomic read - no lock needed)
-	if !serverRunning.Load() {
-		log.Println("DNS server is not running")
-		w.Close()
-		return
-	}
-
-	// Route DDNS UPDATE messages to the dedicated handler.
-	// UPDATE messages have a different structure (zone section, update section)
-	// and are handled entirely separately from standard queries.
-	if r.Opcode == dns.OpcodeUpdate {
-		dnsMetrics.QueriesDDNS.Add(1)
-		handleDDNSUpdate(w, r)
-		return
-	}
-
-	m := new(dns.Msg)
-	m.SetReply(r)
-	m.Authoritative = true
-
-	// Passive discovery: record that we saw a query from this client IP.
-	// Runs in a goroutine to avoid adding latency to DNS responses.
-	// The device store handles deduplication and MAC correlation internally.
-	if deviceStore != nil {
-		clientIP := discovery.ExtractClientIP(w.RemoteAddr())
-		if clientIP != "" {
-			go deviceStore.ObservePassiveQuery(clientIP)
-		}
-	}
-
-	for _, q := range r.Question {
-		domain := strings.ToLower(strings.TrimSuffix(q.Name, "."))
-		if domain == "" {
-			continue
-		}
-
-		// This host (all NICs) before the device store, which may only know one IP.
-		if isApplianceName(domain) {
-			if answers := selfAnswers(q.Name, q.Qtype); len(answers) > 0 {
-				response := new(dns.Msg)
-				response.SetRcode(r, dns.RcodeSuccess)
-				response.Authoritative = true
-				response.Answer = answers
-				logger.LogDNS(domain, "dns", "self")
-				emitRequestEvent(domain, dns.TypeToString[q.Qtype], "self", false)
-				w.WriteMsg(response)
-				return
-			}
-		}
-
-		// --- 1. Device store lookup (supports A, AAAA, PTR) ---
-		// The device store has its own RWMutex — no need to hold the shared mutex.
-		if deviceStore != nil {
-			var records []discovery.DnsRecord
-
-			// PTR queries: check reverse lookup index
-			if q.Qtype == dns.TypePTR && isReverseDomain(domain) {
-				records = deviceStore.LookupReverse(domain)
-			} else {
-				// Forward queries: A, AAAA, or ANY
-				records = deviceStore.LookupName(domain, q.Qtype)
-			}
-
-			if len(records) > 0 {
-				dnsMetrics.QueriesDevice.Add(1)
-				log.Printf("[DNS] Device store hit: %s %s (%d records)",
-					domain, dns.TypeToString[q.Qtype], len(records))
-				response := new(dns.Msg)
-				response.SetRcode(r, dns.RcodeSuccess)
-				response.Authoritative = true
-				for _, rec := range records {
-					rr := rec.ToRR()
-					if rr != nil {
-						response.Answer = append(response.Answer, rr)
-					}
-				}
-				logger.LogDNS(domain, "dns", "device")
-				emitRequestEvent(domain, dns.TypeToString[q.Qtype], "device", false)
-				w.WriteMsg(response)
-				return
-			}
-		}
-
-		// --- WPAD DNS interception ---
-		// If the queried domain starts with "wpad." or is exactly "wpad",
-		// return our own IP so the client fetches the PAC file from us.
-		// This enables automatic proxy configuration for all network clients
-		// without requiring DHCP option 252.
-		if wpadEnabled.Load() {
-			lowerDomain := strings.ToLower(domain)
-			if lowerDomain == "wpad" || strings.HasPrefix(lowerDomain, "wpad.") {
-				if answers := selfAnswers(q.Name, q.Qtype); len(answers) > 0 {
-					dnsMetrics.QueriesWPAD.Add(1)
-					response := new(dns.Msg)
-					response.SetRcode(r, dns.RcodeSuccess)
-					response.Authoritative = true
-					response.Answer = answers
-					logger.LogDNS(domain, "dns", "wpad")
-					emitRequestEvent(domain, dns.TypeToString[q.Qtype], "wpad", false)
-					w.WriteMsg(response)
-					return
-				}
-			}
-		}
-
-		// --- 2. Exception / internal / blocked ---
-		// Internal records and exception domains still use the legacy maps
-		// protected by the shared mutex.
-		mutex.RLock()
-		isException := exceptionDomains[domain]
-		internalIP, isInternal := internalRecords[domain]
-		mutex.RUnlock()
-
-		// Blocked-domain check now uses the shared DomainListIndex (O(1) lookup).
-		// The index has its own RWMutex — no need to hold the legacy mutex.
-		isBlocked := isDomainBlocked(domain)
-
-		if isException {
-			dnsMetrics.QueriesException.Add(1)
-			log.Println("Domain is exception : ", domain)
-			logger.LogDNS(domain, "dns", "exception")
-			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "exception", false)
-
-		} else if isInternal {
-			dnsMetrics.QueriesInternal.Add(1)
-			log.Println("Domain is internal : ", domain, " - ", internalIP)
-			response := new(dns.Msg)
-			response.SetRcode(r, dns.RcodeSuccess)
-			response.Answer = append(response.Answer, &dns.A{
-				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-				A:   net.ParseIP(internalIP),
-			})
-			logger.LogDNS(domain, "dns", "internal")
-			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "internal", false)
-			w.WriteMsg(response)
-			return
-		} else if isBlocked && dnsFilteringEnabled.Load() {
-			dnsMetrics.QueriesBlocked.Add(1)
-			response := new(dns.Msg)
-			response.SetRcode(r, dns.RcodeSuccess)
-			response.Answer = selfAnswers(domain+".", q.Qtype)
-			if len(response.Answer) == 0 && localIp != "" {
-				response.Answer = append(response.Answer, &dns.A{
-					Hdr: dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-					A:   net.ParseIP(localIp),
-				})
-			}
-			logger.LogDNS(domain, "dns", "blocked")
-			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "blocked", true)
-			w.WriteMsg(response)
-			return
-		} else {
-			// Will be logged as "forward" or "cached" below after the cache check
-		}
-
-		// --- 3. Forward to external resolver (with cache) ---
-		// Check cache first — avoids upstream round-trip for repeated queries.
-		if dnsResponseCache != nil {
-			if cached := dnsResponseCache.Get(q.Name, q.Qtype); cached != nil {
-				dnsMetrics.QueriesCached.Add(1)
-				cached.SetReply(r)
-				cached.Authoritative = false
-				logger.LogDNS(domain, "dns", "cached")
-				emitRequestEvent(domain, dns.TypeToString[q.Qtype], "cached", false)
-				w.WriteMsg(cached)
-				return
-			}
-		}
-
-		// Cache miss — forward to external resolver (no mutex held).
-		useTCP := w.LocalAddr().Network() == "tcp"
-		resp, err := forwardDNSRequest(r, useTCP)
-		if err != nil {
-			dnsMetrics.QueriesError.Add(1)
-			if dnsResponseCache != nil {
-				dnsResponseCache.PutFailure(q.Name, q.Qtype, dns.RcodeServerFailure)
-			}
-			logger.LogDNS(domain, "dns", "error")
-			errMsg := new(dns.Msg)
-			errMsg.SetRcode(r, dns.RcodeServerFailure)
-			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "error", false)
-			w.WriteMsg(errMsg)
-			return
-		}
-
-		logger.LogDNS(domain, "dns", "forward")
-
-		// Cache the upstream response for future queries.
-		if dnsResponseCache != nil {
-			dnsResponseCache.Put(q.Name, q.Qtype, resp)
-		}
-		dnsMetrics.QueriesForwarded.Add(1)
-		emitRequestEvent(domain, dns.TypeToString[q.Qtype], "forwarded", false)
-
-		// Phase 4: Propagate the upstream rcode (NXDOMAIN, NOERROR, etc.)
-		// and copy answers + authority section (contains SOA for negative responses).
-		m.Rcode = resp.Rcode
-		m.Answer = append(m.Answer, resp.Answer...)
-		m.Ns = append(m.Ns, resp.Ns...)
-	}
-	w.WriteMsg(m)
 }
 
 // isReverseDomain returns true if the domain is a PTR reverse-lookup name.

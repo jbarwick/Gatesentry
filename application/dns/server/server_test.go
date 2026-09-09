@@ -2,6 +2,7 @@ package gatesentryDnsServer
 
 import (
 	"net"
+	"strings"
 	"testing"
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
@@ -53,6 +54,7 @@ func setupTestServer(t *testing.T) func() {
 	origBlocked := blockedDomains
 	origException := exceptionDomains
 	origInternal := internalRecords
+	origInternalAAAA := internalRecordsAAAA
 	origRunning := serverRunning.Load()
 	origDDNSEnabled := ddnsEnabled
 	origDDNSTSIGRequired := ddnsTSIGRequired
@@ -64,6 +66,8 @@ func setupTestServer(t *testing.T) func() {
 	blockedDomains = make(map[string]bool)
 	exceptionDomains = make(map[string]bool)
 	internalRecords = make(map[string]string)
+	internalRecordsAAAA = make(map[string]string)
+	ReplaceCustomRecords(nil, nil)
 	serverRunning.Store(true)
 	ddnsEnabled = true
 	ddnsTSIGRequired = false
@@ -84,6 +88,7 @@ func setupTestServer(t *testing.T) func() {
 		blockedDomains = origBlocked
 		exceptionDomains = origException
 		internalRecords = origInternal
+		internalRecordsAAAA = origInternalAAAA
 		serverRunning.Store(origRunning)
 		ddnsEnabled = origDDNSEnabled
 		ddnsTSIGRequired = origDDNSTSIGRequired
@@ -228,7 +233,7 @@ func TestHandleDNS_DeviceStoreNoMatchFallsThrough(t *testing.T) {
 	})
 
 	// Query for a name NOT in device store but IS in legacy internal records
-	internalRecords["oldserver.local"] = "10.0.0.5"
+	ReplaceCustomRecords(map[string]string{"oldserver.local": "10.0.0.5"}, nil)
 
 	req := new(dns.Msg)
 	req.SetQuestion("oldserver.local.", dns.TypeA)
@@ -248,6 +253,156 @@ func TestHandleDNS_DeviceStoreNoMatchFallsThrough(t *testing.T) {
 	}
 	if a.A.String() != "10.0.0.5" {
 		t.Errorf("Expected legacy A record 10.0.0.5, got %s", a.A.String())
+	}
+}
+
+func TestHandleDNS_InternalAAAA(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ReplaceCustomRecords(nil, map[string]string{"v6host.local": "2001:db8::10"})
+
+	req := new(dns.Msg)
+	req.SetQuestion("v6host.local.", dns.TypeAAAA)
+	w := newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(w, req)
+
+	if w.msg == nil {
+		t.Fatal("Expected response")
+	}
+	if len(w.msg.Answer) != 1 {
+		t.Fatalf("Expected 1 AAAA, got %d", len(w.msg.Answer))
+	}
+	aaaa, ok := w.msg.Answer[0].(*dns.AAAA)
+	if !ok {
+		t.Fatalf("got %T", w.msg.Answer[0])
+	}
+	if aaaa.AAAA.String() != "2001:db8::10" {
+		t.Errorf("AAAA = %s", aaaa.AAAA)
+	}
+}
+
+func TestHandleDNS_InternalDualStackAndWireAAAA(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ReplaceCustomRecords(
+		map[string]string{"dual.example": "192.0.2.80"},
+		map[string]string{"dual.example": "2001:db8::80"},
+	)
+
+	req := new(dns.Msg)
+	req.SetQuestion("dual.example.", dns.TypeAAAA)
+	w := newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(w, req)
+	if w.msg == nil || len(w.msg.Answer) != 1 {
+		t.Fatalf("AAAA answers = %v", w.msg)
+	}
+	aaaa, ok := w.msg.Answer[0].(*dns.AAAA)
+	if !ok {
+		t.Fatalf("got %T", w.msg.Answer[0])
+	}
+	if aaaa.AAAA.To4() != nil || aaaa.AAAA.To16() == nil {
+		t.Fatalf("AAAA is not IPv6: %v", aaaa.AAAA)
+	}
+	if aaaa.AAAA.String() != "2001:db8::80" {
+		t.Errorf("AAAA = %s", aaaa.AAAA)
+	}
+
+	packed, err := w.msg.Pack()
+	if err != nil {
+		t.Fatalf("pack AAAA response: %v", err)
+	}
+	unpacked := new(dns.Msg)
+	if err := unpacked.Unpack(packed); err != nil {
+		t.Fatalf("unpack AAAA response: %v", err)
+	}
+	got, ok := unpacked.Answer[0].(*dns.AAAA)
+	if !ok {
+		t.Fatalf("unpacked %T", unpacked.Answer[0])
+	}
+	if got.AAAA.String() != "2001:db8::80" {
+		t.Errorf("unpacked AAAA = %s", got.AAAA)
+	}
+
+	reqA := new(dns.Msg)
+	reqA.SetQuestion("dual.example.", dns.TypeA)
+	wA := newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(wA, reqA)
+	if wA.msg == nil || len(wA.msg.Answer) != 1 {
+		t.Fatal("expected A answer")
+	}
+	if _, ok := wA.msg.Answer[0].(*dns.A); !ok {
+		t.Fatalf("got %T", wA.msg.Answer[0])
+	}
+}
+
+func TestHandleDNS_InternalIPv6PTR(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ReplaceCustomRecords(nil, map[string]string{"v6host.example": "2001:db8::10"})
+	arpa, err := dns.ReverseAddr("2001:db8::10")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := new(dns.Msg)
+	req.SetQuestion(arpa, dns.TypePTR)
+	w := newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(w, req)
+	if w.msg == nil || len(w.msg.Answer) != 1 {
+		t.Fatalf("PTR answers = %v", w.msg)
+	}
+	ptr, ok := w.msg.Answer[0].(*dns.PTR)
+	if !ok {
+		t.Fatalf("got %T", w.msg.Answer[0])
+	}
+	if strings.TrimSuffix(ptr.Ptr, ".") != "v6host.example" {
+		t.Errorf("PTR = %q", ptr.Ptr)
+	}
+}
+
+func TestHandleDNS_CustomBeforeBlocklist(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	dnsFilteringEnabled.Store(true)
+	blockedDomains["ads.example"] = true
+	ReplaceCustomRecords(map[string]string{"ads.example": "192.0.2.9"}, nil)
+
+	req := new(dns.Msg)
+	req.SetQuestion("ads.example.", dns.TypeA)
+	w := newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(w, req)
+	if w.msg == nil || len(w.msg.Answer) != 1 {
+		t.Fatalf("expected custom A, got %+v", w.msg)
+	}
+	a, ok := w.msg.Answer[0].(*dns.A)
+	if !ok || a.A.String() != "192.0.2.9" {
+		t.Fatalf("custom record must beat blocklist, got %v", w.msg.Answer)
+	}
+}
+
+func TestHandleDNS_InternalAAAAOnlyNODATAForA(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ReplaceCustomRecords(nil, map[string]string{"v6only.local": "2001:db8::11"})
+
+	req := new(dns.Msg)
+	req.SetQuestion("v6only.local.", dns.TypeA)
+	w := newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(w, req)
+
+	if w.msg == nil {
+		t.Fatal("Expected response")
+	}
+	if w.msg.Rcode != dns.RcodeSuccess {
+		t.Errorf("Rcode = %d, want NOERROR", w.msg.Rcode)
+	}
+	if len(w.msg.Answer) != 0 {
+		t.Errorf("A query for AAAA-only name should be NODATA, got %d answers", len(w.msg.Answer))
 	}
 }
 
@@ -294,7 +449,7 @@ func TestHandleDNS_DeviceStorePriority(t *testing.T) {
 		Source:    discovery.SourceDDNS,
 		Sources:   []discovery.DiscoverySource{discovery.SourceDDNS},
 	})
-	internalRecords["myserver.local"] = "10.0.0.99"
+	ReplaceCustomRecords(map[string]string{"myserver.local": "10.0.0.99"}, nil)
 
 	req := new(dns.Msg)
 	req.SetQuestion("myserver.local.", dns.TypeA)
@@ -312,9 +467,8 @@ func TestHandleDNS_DeviceStorePriority(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected A record, got %T", w.msg.Answer[0])
 	}
-	// Device store should take priority over legacy internal records
-	if a.A.String() != "192.0.2.200" {
-		t.Errorf("Expected device store IP 192.0.2.200, got %s (device store should take priority)", a.A.String())
+	if a.A.String() != "10.0.0.99" {
+		t.Errorf("Expected custom record 10.0.0.99, got %s (custom records precede device store)", a.A.String())
 	}
 }
 

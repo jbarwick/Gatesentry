@@ -215,7 +215,7 @@ func (r *DnsRecord) ToRR() dns.RR {
 				Class:  dns.ClassINET,
 				Ttl:    r.TTL,
 			},
-			AAAA: net.ParseIP(r.Value),
+			AAAA: net.ParseIP(r.Value).To16(),
 		}
 	case dns.TypePTR:
 		return &dns.PTR{

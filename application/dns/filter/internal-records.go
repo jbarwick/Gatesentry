@@ -2,29 +2,48 @@ package gatesentryDnsFilter
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-func InitializeInternalRecords(records *map[string]string, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore) {
+// OnCustomRecordsLoaded publishes the loaded A/AAAA maps to the DNS query
+// path. Set by the DNS server to avoid an import cycle.
+var OnCustomRecordsLoaded func(ipv4, ipv6 map[string]string)
+
+func InitializeInternalRecords(records *map[string]string, aaaa *map[string]string, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	fmt.Println("Initializing internal records...")
 	internalRecordsString := settings.Get("DNS_custom_entries")
-	log.Println("[DNS] Internal records string = ", internalRecordsString)
-	// parse json string to struct
 	var customEntries []gatesentryTypes.DNSCustomEntry
 	json.Unmarshal([]byte(internalRecordsString), &customEntries)
 
 	*records = make(map[string]string)
+	if aaaa != nil {
+		*aaaa = make(map[string]string)
+	}
 	for _, entry := range customEntries {
-		log.Println("[DNS] Internal record = ", entry.Domain, entry.IP)
-		(*records)[entry.Domain] = entry.IP
+		domain := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(entry.Domain), "."))
+		if domain == "" {
+			continue
+		}
+		if entry.IP != "" {
+			(*records)[domain] = entry.IP
+		}
+		if aaaa != nil && entry.IPv6 != "" {
+			(*aaaa)[domain] = entry.IPv6
+		}
 	}
 
-	fmt.Println("Internal records initialized. Number of internal records = ", len(*records))
+	aaaaMap := map[string]string{}
+	if aaaa != nil {
+		aaaaMap = *aaaa
+	}
+	if OnCustomRecordsLoaded != nil {
+		OnCustomRecordsLoaded(*records, aaaaMap)
+	}
+	log.Printf("[DNS] Custom records loaded: %d A, %d AAAA", len(*records), len(aaaaMap))
 }

@@ -35,7 +35,7 @@ var hmacSampleSecret = []byte("I7JE72S9XJ48ANXMI78ASDNMQ839")
 // corsMiddleware adds CORS headers to all API responses.
 // Echoes back the Origin header to allow cross-origin requests from any hostname,
 // which is necessary when accessing GateSentry from different device hostnames
-// (e.g., monster-jj, monster-jj.local, monster-jj.jvj28.com, localhost, IP addresses).
+// (e.g., servername, servername.local, servername.example.com, localhost, IP addresses).
 var corsMiddleware mux.MiddlewareFunc = func(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if origin := r.Header.Get("Origin"); origin != "" {

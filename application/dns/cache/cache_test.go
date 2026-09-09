@@ -257,6 +257,37 @@ func TestMinTTLClamp(t *testing.T) {
 	}
 }
 
+func TestPositiveTTLUsesAnswerNotSOA(t *testing.T) {
+	cfg := fastConfig()
+	cfg.MinTTL = 1 * time.Second
+	cfg.MaxTTL = 1 * time.Hour
+	c := New(cfg)
+	defer c.Stop()
+
+	msg := makeMsg("example.com", dns.TypeA, 300)
+	msg.Ns = []dns.RR{
+		&dns.SOA{
+			Hdr:     dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 30},
+			Ns:      "ns.example.com.",
+			Mbox:    "hostmaster.example.com.",
+			Serial:  1,
+			Refresh: 1,
+			Retry:   1,
+			Expire:  1,
+			Minttl:  30,
+		},
+	}
+	c.Put("example.com.", dns.TypeA, msg)
+	got := c.Get("example.com.", dns.TypeA)
+	if got == nil {
+		t.Fatal("expected hit")
+	}
+	ttl := got.Answer[0].Header().Ttl
+	if ttl < 250 {
+		t.Errorf("positive cache should follow A TTL (~300), not SOA TTL 30; got %d", ttl)
+	}
+}
+
 func TestMaxTTLClamp(t *testing.T) {
 	cfg := fastConfig()
 	cfg.MaxTTL = 60 * time.Second

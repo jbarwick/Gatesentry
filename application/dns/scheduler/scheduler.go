@@ -16,6 +16,7 @@ type InitializerType func(*map[string]bool, *[]string, *sync.RWMutex)
 func RunScheduler(blockedDomains *map[string]bool,
 	blockedLists *[]string,
 	internalRecords *map[string]string,
+	internalAAAA *map[string]string,
 	exceptionDomains *map[string]bool,
 	mutex *sync.RWMutex,
 	settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo,
@@ -31,10 +32,10 @@ func RunScheduler(blockedDomains *map[string]bool,
 		select {
 		case <-restartChan:
 			log.Println("Restarting scheduler...")
-			doInitialize(blockedDomains, blockedLists, internalRecords, exceptionDomains, mutex, settings, dnsinfo, updateIntervalHourly, restartChan, dlManager)
+			doInitialize(blockedDomains, blockedLists, internalRecords, internalAAAA, exceptionDomains, mutex, settings, dnsinfo, updateIntervalHourly, restartChan, dlManager)
 		case <-ticker.C:
 			log.Println("Running scheduler...")
-			doInitialize(blockedDomains, blockedLists, internalRecords, exceptionDomains, mutex, settings, dnsinfo, updateIntervalHourly, restartChan, dlManager)
+			doInitialize(blockedDomains, blockedLists, internalRecords, internalAAAA, exceptionDomains, mutex, settings, dnsinfo, updateIntervalHourly, restartChan, dlManager)
 		}
 	}
 
@@ -43,6 +44,7 @@ func RunScheduler(blockedDomains *map[string]bool,
 func doInitialize(blockedDomains *map[string]bool,
 	blockedLists *[]string,
 	internalRecords *map[string]string,
+	internalAAAA *map[string]string,
 	exceptionDomains *map[string]bool,
 	mutex *sync.RWMutex,
 	settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo,
@@ -51,7 +53,7 @@ func doInitialize(blockedDomains *map[string]bool,
 	dlManager *gatesentryDomainList.DomainListManager) {
 
 	// Initialize internal records and exception domains (legacy path — still needed)
-	gatesentryDnsFilter.InitializeFilters(internalRecords, exceptionDomains, mutex, settings)
+	gatesentryDnsFilter.InitializeFilters(internalRecords, internalAAAA, exceptionDomains, mutex, settings)
 
 	// Refresh all domain lists (downloads URL-sourced lists, rebuilds index).
 	// This replaces the old InitializeBlockedDomains flow.
