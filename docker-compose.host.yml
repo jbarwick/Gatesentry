@@ -20,7 +20,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gatesentry:2.0.0-beta.7
+    image: gatesentry:2.0.0-beta.8
     container_name: gatesentry
     restart: unless-stopped
     network_mode: host
@@ -29,6 +29,7 @@ services:
     environment:
       - TZ=${TZ:-UTC}
       - GS_ADMIN_PORT=8080
+      - GS_ADMIN_PORT_SSL=9877
       - GS_BASE_PATH=/
       - GATESENTRY_DNS_PORT=53
       # Quote this value. Bare :: is invalid YAML (nested mapping).

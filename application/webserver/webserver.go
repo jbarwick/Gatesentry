@@ -313,7 +313,7 @@ func RegisterEndpointsStartServer(
 	}))
 
 	internalServer.Get("/api/about", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		responseJson := gatesentryWebserverEndpoints.GSApiAboutGET(runtime)
+		responseJson := gatesentryWebserverEndpoints.GSApiAboutGET(runtime, AdminHTTPSPort())
 		SendJSON(w, responseJson)
 	}))
 
@@ -569,6 +569,18 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	internalServer.Get("/api/files/admin-https-ca", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ca := []byte(internalSettings.Get("admin_https_capem"))
+		if len(ca) == 0 {
+			http.Error(w, "no admin HTTPS CA uploaded", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-pem-file")
+		w.Header().Set("Content-Disposition", "attachment; filename=gatesentry-admin-ca.crt")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(ca)
+	}))
+
 	internalServer.Get("/api/files/certificate", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		output := gatesentryWebserverEndpoints.GetCertificateBytes(internalSettings)
 		w.Header().Set("Content-Disposition", "attachment; filename=gatesentry-ca.crt")
@@ -797,6 +809,11 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/excludehosts", baseIndexHandler)
 	internalServer.Get("/devices", baseIndexHandler)
 	internalServer.Get("/ai", baseIndexHandler)
+
+	gatesentryWebserverEndpoints.ApplyAdminHTTPS = func(s *gatesentry2storage.MapStore) {
+		applyAdminHTTPS(internalServer.router, s)
+	}
+	applyAdminHTTPS(internalServer.router, internalSettings)
 
 	internalServer.ListenAndServe(":" + port)
 

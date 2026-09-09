@@ -25,9 +25,10 @@ RUN mkdir -p /usr/local/gatesentry/gatesentry
 # Documented ports (actual binds come from env; host-network often uses 53/80):
 #   10053  - DNS (bridged sample)
 #   8080   - Admin UI (GS_ADMIN_PORT)
+#   9877   - Admin HTTPS (GS_ADMIN_PORT_SSL)
 #   10413  - HTTP(S) proxy
 #   10414  - Transparent proxy
 #   5353   - mDNS
-EXPOSE 10053/udp 10053/tcp 8080/tcp 10413/tcp 10414/tcp 5353/udp
+EXPOSE 10053/udp 10053/tcp 8080/tcp 9877/tcp 10413/tcp 10414/tcp 5353/udp
 
 ENTRYPOINT ["./gatesentry-bin"]

@@ -4,11 +4,13 @@
   import ConnectedGeneralSettingInput from "../../components/connectedGeneralSettingInputs.svelte";
   import HttpsToggle from "../../components/httpsToggle.svelte";
   import ConnectedCertificateComposed from "../../components/connectedCertificateComposed.svelte";
+  import AdminHttpsSettings from "../../components/adminHttpsSettings.svelte";
   import WpadSettings from "../../components/wpadSettings.svelte";
   import {
     Settings as SettingsIcon,
     Report,
     Security,
+    Locked,
     Network_3,
   } from "carbon-icons-svelte";
 </script>
@@ -44,6 +46,17 @@
         disabled={true}
       />
     </div>
+  </div>
+</section>
+
+<!-- ── Admin HTTPS Server ── -->
+<section class="gs-section">
+  <div class="gs-card settings-card">
+    <div class="card-header">
+      <Locked size={20} />
+      <h5>{$_("Admin HTTPS Server")}</h5>
+    </div>
+    <AdminHttpsSettings />
   </div>
 </section>
 

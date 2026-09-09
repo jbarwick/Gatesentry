@@ -7,7 +7,7 @@ Important context for AI agents working on this project.
 - **Active development is `v2`** (this checkout tracks `myfork/v2`). Do not treat origin/master or v1.20.x / "1.2" as the working tree.
 - Upstream: `origin` = https://github.com/fifthsegment/Gatesentry.git
 - Fork: `myfork` = https://github.com/jbarwick/Gatesentry.git
-- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.7`). That string is the only release tag. Do not invent a different version for the image.
+- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.8`). That string is the only release tag. Do not invent a different version for the image.
 
 ## Which tree to use for deployments
 
@@ -97,6 +97,7 @@ Defaults in this repo (local `docker-compose.yml` / `run.sh`):
 | Service       | Default Port | Environment Variable       |
 |---------------|-------------|---------------------------|
 | Admin UI      | **8080**    | `GS_ADMIN_PORT`           |
+| Admin HTTPS   | **9877**    | `GS_ADMIN_PORT_SSL`       |
 | DNS server    | **10053**   | `GATESENTRY_DNS_PORT`     |
 | Proxy server  | **10413**   | (see proxy config)        |
 | Transparent   | **10414**   | `GS_TRANSPARENT_PROXY_PORT` |
@@ -107,6 +108,7 @@ Defaults in this repo (local `docker-compose.yml` / `run.sh`):
 | Service    | Port | Notes |
 |------------|------|--------|
 | Admin UI   | **9876** | **`http://monster-jj:9876/gatesentry/`** (`GS_BASE_PATH=/gatesentry`). Root `http://monster-jj:9876/` 302s there. **Do not use `monster-jj.jvj28.com`** — nginx on :80/:443 redirects that FQDN to HTTPS and never reaches GateSentry. |
+| Admin HTTPS | **9877** | `GS_ADMIN_PORT_SSL` — same UI over TLS when enabled in Settings. |
 | Metrics    | **9876** | `http://monster-jj:9876/metrics` (unauthenticated, same listener) |
 | DNS        | **53**   | `GATESENTRY_DNS_PORT=53` — `dig @monster-jj -p 53 example.com` |
 | Proxy      | **10413** | |
@@ -122,6 +124,7 @@ See `run.sh` and `restart.sh` for the full set. Important ones:
 - `GATESENTRY_DNS_PORT` — DNS listen port (default: `10053`)
 - `GATESENTRY_DNS_RESOLVER` — Upstream DNS resolver. **On `Init()`, a non-empty value overwrites stored `dns_resolver`.** Use this to recover when the saved resolver is unreachable.
 - `GS_ADMIN_PORT` — Admin web UI port (default `8080`; production `9876`)
+- `GS_ADMIN_PORT_SSL` — Admin HTTPS port (default `9877`; production `9877`). Serves the same UI when **Admin HTTPS Server** is enabled in Settings. Server cert/key and admin CA are stored separately from MITM `capem`/`keypem`.
 - `GS_BASE_PATH` — URL prefix (default `/gatesentry`; production `/gatesentry`)
 - `GS_MAX_SCAN_SIZE_MB` — Max content scan size (default: `2`)
 
@@ -317,4 +320,4 @@ We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_R
 - **DNS page UI load/save of assigned list IDs** (`dnslists.svelte` / `dns.svelte`) was still being debugged. DNS filtering itself works.
 - **Production hang when upstream DNS is down** — see Availability section. Highest priority before bringing monster-jj back.
 - **`log.db` growth** (134MB) — stats default to a 7-day full scan (`handler_stats.go`).
-- Production image on monster-jj is `2.0.0-beta.7`. Next ship: bump `GATESENTRY_VERSION` in `main.go`, then `./build.sh && ./release.sh && ./deploy.sh`.
+- Production image on monster-jj is `2.0.0-beta.8`. Next ship: bump `GATESENTRY_VERSION` in `main.go`, then `./build.sh && ./release.sh && ./deploy.sh`.

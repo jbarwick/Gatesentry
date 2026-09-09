@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v2.0.0-beta.8 (9 September 2026)
+
+- Admin HTTPS on `GS_ADMIN_PORT_SSL` (default 9877), enabled from Settings above MITM
+- Upload server certificate (and key) plus a separate admin CA; not the MITM CA unless you paste the same PEM
+
 ## v2.0.0-beta.7 (9 September 2026)
 
 - Ignore this process's own Bonjour advertisements so they are not applied as another device's name

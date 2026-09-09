@@ -121,13 +121,18 @@ func (g *GsWeb) ListenAndServe(port string) error {
 	return srv.ListenAndServe()
 }
 
-// ShutdownAdmin stops the admin HTTP server. Safe if it was never started.
+// ShutdownAdmin stops the admin HTTP and HTTPS servers. Safe if never started.
 func ShutdownAdmin(ctx context.Context) error {
 	adminServerMu.Lock()
 	srv := adminServer
 	adminServerMu.Unlock()
-	if srv == nil {
-		return nil
+	var httpErr error
+	if srv != nil {
+		httpErr = srv.Shutdown(ctx)
 	}
-	return srv.Shutdown(ctx)
+	httpsErr := shutdownAdminHTTPS(ctx)
+	if httpErr != nil {
+		return httpErr
+	}
+	return httpsErr
 }

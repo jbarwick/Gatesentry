@@ -7,6 +7,7 @@ fi
 
 # Admin UI port — default 80 requires root; use 8080 for local dev
 export GS_ADMIN_PORT="${GS_ADMIN_PORT:-8080}"
+export GS_ADMIN_PORT_SSL="${GS_ADMIN_PORT_SSL:-9877}"
 export GS_MAX_SCAN_SIZE_MB="${GS_MAX_SCAN_SIZE_MB:-2}"
 
 # Unset proxy env vars — the GateSentry proxy server must not route its own

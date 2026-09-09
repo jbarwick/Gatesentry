@@ -18,13 +18,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gatesentry:2.0.0-beta.7
+    image: gatesentry:2.0.0-beta.8
     container_name: gatesentry
     restart: unless-stopped
     ports:
       - "10053:10053/udp"
       - "10053:10053/tcp"
       - "8080:8080"
+      - "9877:9877"
       - "10413:10413"
       - "10414:10414"
       - "5353:5353/udp"
@@ -33,6 +34,7 @@ services:
     environment:
       - TZ=${TZ:-UTC}
       - GS_ADMIN_PORT=8080
+      - GS_ADMIN_PORT_SSL=9877
       # Code default is /gatesentry; / makes the UI http://host:8080/
       - GS_BASE_PATH=/
       - GATESENTRY_DNS_PORT=10053

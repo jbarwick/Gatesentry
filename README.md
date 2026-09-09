@@ -2,7 +2,7 @@
 
 An open-source DNS filter, HTTPS-inspecting proxy, and parental-control appliance with a web admin UI.
 
-**This is the v2 branch** (`2.0.0-beta.7`), a fork of [fifthsegment/Gatesentry](https://github.com/fifthsegment/Gatesentry). Filtering is rule-based (Allow or Block, per user) rather than a pile of global lists. Pre-release: APIs and settings may still change.
+**This is the v2 branch** (`2.0.0-beta.8`), a fork of [fifthsegment/Gatesentry](https://github.com/fifthsegment/Gatesentry). Filtering is rule-based (Allow or Block, per user) rather than a pile of global lists. Pre-release: APIs and settings may still change.
 
 [Release notes](https://github.com/jbarwick/Gatesentry/releases/tag/v2.0.0-beta.3) · [RFC to upstream](https://github.com/fifthsegment/Gatesentry/pull/141)
 
@@ -21,7 +21,7 @@ Typical uses: ad / tracker blocking, parental controls, bandwidth saving, phishi
 | **Docker Engine + Compose v2** | optional | Recommended way to run it |
 | **Linux** | — | Primary target (transparent proxy and TPROXY are Linux-only) |
 
-The Docker image is **runtime-only**: it copies a binary you already built with `./build.sh`. There is no pre-built `2.0.0-beta.7` image on Docker Hub yet (`jbarwick/gatesentry:latest` is still `2.0.0-alpha.15`).
+The Docker image is **runtime-only**: it copies a binary you already built with `./build.sh`. There is no pre-built `2.0.0-beta.8` image on Docker Hub yet (`jbarwick/gatesentry:latest` is still `2.0.0-alpha.15`).
 
 ---
 

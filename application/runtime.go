@@ -214,6 +214,10 @@ func (R *GSRuntime) Init() {
 		R.GSSettings.SetDefault("timezone", "UTC")
 	}
 	R.GSSettings.SetDefault("enable_https_filtering", "false")
+	R.GSSettings.SetDefault("enable_admin_https", "false")
+	R.GSSettings.SetDefault("admin_https_certpem", "")
+	R.GSSettings.SetDefault("admin_https_keypem", "")
+	R.GSSettings.SetDefault("admin_https_capem", "")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
 	R.GSSettings.SetDefault("enable_dns_filtering", "true")
 	// Use environment variable for DNS resolver if set, otherwise use default

@@ -3,6 +3,7 @@ package gatesentryWebserverEndpoints
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
@@ -25,7 +26,7 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 			value = string(valueJson)
 		}
 		return struct{ Value string }{Value: value}
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "enable_dns_filtering", "dns_custom_entries", "dns_domain_lists", "dns_whitelist_domain_lists", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver", "dns_resolver_ipv6", "wpad_enabled", "wpad_proxy_host", "wpad_proxy_port", "wpad_bypass_domain_lists", "dns_local_zone", "ddns_enabled", "ddns_tsig_required", "ddns_tsig_key_name", "ddns_tsig_key_secret":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "enable_dns_filtering", "dns_custom_entries", "dns_domain_lists", "dns_whitelist_domain_lists", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver", "dns_resolver_ipv6", "wpad_enabled", "wpad_proxy_host", "wpad_proxy_port", "wpad_bypass_domain_lists", "dns_local_zone", "ddns_enabled", "ddns_tsig_required", "ddns_tsig_key_name", "ddns_tsig_key_secret", "enable_admin_https", "admin_https_certpem", "admin_https_keypem", "admin_https_capem":
 		value := settings.Get(requestedId)
 		return struct {
 			Key   string
@@ -100,7 +101,45 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		requestedId == "ddns_enabled" ||
 		requestedId == "ddns_tsig_required" ||
 		requestedId == "ddns_tsig_key_name" ||
-		requestedId == "ddns_tsig_key_secret" {
+		requestedId == "ddns_tsig_key_secret" ||
+		requestedId == "enable_admin_https" ||
+		requestedId == "admin_https_certpem" ||
+		requestedId == "admin_https_keypem" ||
+		requestedId == "admin_https_capem" {
+		if requestedId == "admin_https_certpem" {
+			cert, key := SplitCertKeyPEM(temp.Value)
+			if cert != "" {
+				temp.Value = cert
+			}
+			nextKey := settings.Get("admin_https_keypem")
+			if key != "" {
+				nextKey = key
+			}
+			if strings.TrimSpace(temp.Value) != "" && strings.TrimSpace(nextKey) != "" {
+				if err := ValidateServerTLS(temp.Value, nextKey); err != nil {
+					temp.Value = "ERROR: " + err.Error()
+					return temp
+				}
+			}
+			if key != "" {
+				settings.Update("admin_https_keypem", key)
+			}
+		}
+		if requestedId == "admin_https_keypem" {
+			nextCert := settings.Get("admin_https_certpem")
+			if strings.TrimSpace(nextCert) != "" && strings.TrimSpace(temp.Value) != "" {
+				if err := ValidateServerTLS(nextCert, temp.Value); err != nil {
+					temp.Value = "ERROR: " + err.Error()
+					return temp
+				}
+			}
+		}
+		if requestedId == "admin_https_capem" && strings.TrimSpace(temp.Value) != "" {
+			if err := ValidateCAPEM(temp.Value); err != nil {
+				temp.Value = "ERROR: " + err.Error()
+				return temp
+			}
+		}
 		settings.Update(requestedId, temp.Value)
 		if requestedId == "dns_resolver" {
 			gatesentryDnsServer.SetExternalResolver(temp.Value)
@@ -140,6 +179,11 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		}
 		if requestedId == "ddns_tsig_key_name" || requestedId == "ddns_tsig_key_secret" {
 			gatesentryDnsServer.UpdateTSIGKey(settings.Get("ddns_tsig_key_name"), settings.Get("ddns_tsig_key_secret"))
+		}
+		if requestedId == "enable_admin_https" || requestedId == "admin_https_certpem" || requestedId == "admin_https_keypem" {
+			if ApplyAdminHTTPS != nil {
+				ApplyAdminHTTPS(settings)
+			}
 		}
 	}
 
