@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v2.0.0-beta.6 (9 September 2026)
+
+- Hostname ownership prefers a bare DNS label over the same name with `.local`, so a stolen alias is not treated as the owner
+
 ## v2.0.0-beta.5 (9 September 2026)
 
 - Device names: do not fuse two named devices when mDNS/DDNS mixes a name with another host's address

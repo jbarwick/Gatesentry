@@ -838,24 +838,27 @@ func (ds *DeviceStore) stampObservedNames(device, existing *Device, hosts, mdns 
 	device.MDNSNameSeen = seenM
 }
 
-// reclaimStolenNames enforces one hostname → one device. The owner is the
-// device whose DNS name or primary hostname matches the key; other devices
-// drop that alias.
+// reclaimStolenNames enforces one hostname → one device. Ownership is
+// scored so a bare DNS label wins over the same name with a .local suffix,
+// independent of map iteration order.
 func (ds *DeviceStore) reclaimStolenNames() {
 	owner := map[string]string{}
-	for _, d := range ds.devices {
-		keys := []string{d.DNSName}
-		if len(d.Hostnames) > 0 {
-			keys = append(keys, d.Hostnames[0])
+	score := map[string]int{}
+	claim := func(id, name string) {
+		k := hostnameKey(name)
+		if k == "" {
+			return
 		}
-		for _, k := range keys {
-			nk := hostnameKey(k)
-			if nk == "" {
-				continue
-			}
-			if _, exists := owner[nk]; !exists {
-				owner[nk] = d.ID
-			}
+		s := hostnameClaimScore(name)
+		if prev, ok := score[k]; !ok || s > prev {
+			owner[k] = id
+			score[k] = s
+		}
+	}
+	for _, d := range ds.devices {
+		claim(d.ID, d.DNSName)
+		if len(d.Hostnames) > 0 {
+			claim(d.ID, d.Hostnames[0])
 		}
 	}
 	for _, d := range ds.devices {
@@ -863,6 +866,16 @@ func (ds *DeviceStore) reclaimStolenNames() {
 		d.MDNSNames = filterNamesNotOwnedByOthers(d.MDNSNames, d.ID, owner)
 		ds.refreshDerivedNames(d)
 	}
+}
+
+func hostnameClaimScore(name string) int {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.TrimSuffix(n, ".")
+	k := hostnameKey(n)
+	if k != "" && n == k {
+		return 2
+	}
+	return 1
 }
 
 func filterNamesNotOwnedByOthers(names []string, id string, owner map[string]string) []string {

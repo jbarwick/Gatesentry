@@ -317,6 +317,34 @@ func TestReclaimStolenNames(t *testing.T) {
 	}
 }
 
+func TestReclaimPrefersBareDNSLabel(t *testing.T) {
+	store := NewDeviceStore("local")
+	// Insert the aliased record first so map iteration may see it before the
+	// real owner — scoring must still give "nas" to the bare label.
+	pc := store.UpsertDevice(&Device{
+		DNSName:   "nas-local",
+		Hostnames: []string{"nas.local", "pc"},
+		IPv4:      "192.0.2.50",
+		Source:    SourceMDNS,
+	})
+	nas := store.UpsertDevice(&Device{
+		DNSName:   "nas",
+		Hostnames: []string{"nas"},
+		IPv4:      "192.0.2.1",
+		Source:    SourceMDNS,
+	})
+	got := store.GetDevice(pc)
+	if got.HasHostnameKey("nas") {
+		t.Errorf("pc still holds nas: %v dns=%s", got.Hostnames, got.DNSName)
+	}
+	if !got.HasHostnameKey("pc") {
+		t.Errorf("pc lost its own name: %v", got.Hostnames)
+	}
+	if store.GetDevice(nas).DNSName != "nas" {
+		t.Errorf("nas DNSName = %q", store.GetDevice(nas).DNSName)
+	}
+}
+
 func TestProcessEntry_NilEntry(t *testing.T) {
 	store := NewDeviceStore("local")
 	browser := NewMDNSBrowser(store, time.Minute)
