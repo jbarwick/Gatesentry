@@ -127,6 +127,7 @@ See `run.sh` and `restart.sh` for the full set. Important ones:
 - `GS_ADMIN_PORT_SSL` — Admin HTTPS port (default `9877`; production `9877`). Serves the same UI when **Admin HTTPS Server** is enabled in Settings. Server cert/key and admin CA are stored separately from MITM `capem`/`keypem`.
 - `GS_BASE_PATH` — URL prefix (default `/gatesentry`; production `/gatesentry`)
 - `GS_MAX_SCAN_SIZE_MB` — Max content scan size (default: `2`)
+- `GS_AI_GROK_API_KEY`, `GS_AI_OPENAI_API_KEY`, `GS_AI_OLLAMA_URL`, `GS_AI_OLLAMA_MODEL`, `GS_AI_GROK_MODEL`, `GS_AI_OPENAI_MODEL`, `GS_AI_IMAGE_FILTERING_MODE` — optional presets for `/gatesentry/ai`. **Seeded only when the stored setting is empty** (placeholders like `CHANGE_ME` are ignored). The AI page can change them; a later start does not overwrite a saved value. Same names are used in `.env` / docker compose and live vision tests.
 
 ## curl / HTTP Requests
 
@@ -260,6 +261,7 @@ These rules are derived from recurring issues caught during PR code reviews. **A
 - **Run `make lint`** before committing Go changes. The project uses `golangci-lint` (config: `.golangci.yml`).
 - **Run `shellcheck`** on any modified `.sh` files.
 - Pre-commit hooks (`.pre-commit-config.yaml`) automate both — install with `pre-commit install`.
+- There is no such thing as pre-existing warnings and errors from the linter or unit tests. All tests must work, and all errors must be cleared.
 
 ### Security — HTML/JS/Template Injection
 
@@ -300,6 +302,7 @@ These rules are derived from recurring issues caught during PR code reviews. **A
 
 - **No verbose logging in hot paths**. Functions called on every request (DNS handler, proxy handlers, `GetHistory`) should not log per-invocation unless behind a debug flag. The production DNS handler still logs every query — do not add more of that.
 - **No no-op tests**. Every test function must contain at least one assertion.
+- **All tests must pass.** Do not dismiss lint or unittest failures as pre-existing. Fix them.
 - **Documentation consistency**: When changing default ports, paths, or URLs, grep README.md, AGENTS.md, Makefile, Dockerfile, docker-compose.yml, run.sh/restart.sh, and the Synology compose.
 
 ## Current Work In Progress
@@ -320,4 +323,4 @@ We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_R
 - **DNS page UI load/save of assigned list IDs** (`dnslists.svelte` / `dns.svelte`) was still being debugged. DNS filtering itself works.
 - **Production hang when upstream DNS is down** — see Availability section. Highest priority before bringing monster-jj back.
 - **`log.db` growth** (134MB) — stats default to a 7-day full scan (`handler_stats.go`).
-- Production image on monster-jj is `2.0.0-beta.12`. Next ship: bump `GATESENTRY_VERSION` in `main.go`, then `./build.sh && ./release.sh && ./deploy.sh`.
+- Production image on monster-jj is `GATESENTRY_VERSION` in `main.go`. Ship with `./build.sh && ./release.sh && ./deploy.sh`.

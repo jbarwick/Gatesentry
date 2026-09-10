@@ -23,3 +23,7 @@ tests/fixtures/*:Zone.Identifier
 tests/proxy_benchmark_results.log
 proxy_test_server.log
 application/storage/gatesentrytestset
+
+# Local secrets for AI vision tests (copy from .env.example)
+.env
+.env.local

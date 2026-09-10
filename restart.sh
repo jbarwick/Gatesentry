@@ -9,6 +9,9 @@ fi
 export GS_ADMIN_PORT="${GS_ADMIN_PORT:-8080}"
 export GS_ADMIN_PORT_SSL="${GS_ADMIN_PORT_SSL:-9877}"
 export GS_MAX_SCAN_SIZE_MB="${GS_MAX_SCAN_SIZE_MB:-2}"
+# Never steal the workstation resolver on :53
+export GATESENTRY_DNS_PORT="${GATESENTRY_DNS_PORT:-10053}"
+export GATESENTRY_DNS_ADDR="${GATESENTRY_DNS_ADDR:-127.0.0.1}"
 
 # Unset proxy env vars — the GateSentry proxy server must not route its own
 # outbound requests through itself (or any other proxy).

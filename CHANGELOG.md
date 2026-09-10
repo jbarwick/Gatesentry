@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## v2.0.0-beta.20 (10 September 2026)
+
+- DNS page: TSIG shared-secret copy works on HTTP admin (clipboard fallback)
+
+## v2.0.0-beta.19 (10 September 2026)
+
+- AI page: editable Grok, ChatGPT, and Ollama model ids
+
+## v2.0.0-beta.18 (10 September 2026)
+
+- AI page status badges re-render when probes finish (Svelte reactivity)
+
+## v2.0.0-beta.17 (10 September 2026)
+
+- AI status uses server probe as source of truth; empty fields stay Not configured
+- Radio save no longer posts the old value when the AI page re-renders
+
+## v2.0.0-beta.16 (10 September 2026)
+
+- AI status: empty fields show Not configured immediately; probes go direct (no HTTP proxy, no GateSentry DNS)
+- Grok/OpenAI API hosts are not filtered if the probe is intercepted by the proxy
+
+## v2.0.0-beta.15 (10 September 2026)
+
+- AI page: reachability status on each config card (Grok, ChatGPT, Ollama, legacy scanner)
+
+## v2.0.0-beta.14 (10 September 2026)
+
+- AI page Alpha badge is red
+
+## v2.0.0-beta.13 (10 September 2026)
+
+- AI page (Alpha): Grok / ChatGPT / Local LLM radios, API keys, Ollama URL
+- Local LLM URL stored as `ai_local_llm_url` (not used on the request path yet)
+
 ## v2.0.0-beta.12 (9 September 2026)
 
 - Device details tabs keep a fixed height so the dialog does not resize when switching tabs

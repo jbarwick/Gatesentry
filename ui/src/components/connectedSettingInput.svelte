@@ -6,6 +6,9 @@
   export let type;
   export let disabled = false;
   export let disableOnblur = false;
+  export let radioOptions: { value: string; label: string }[] | null = null;
+  export let orientation: "horizontal" | "vertical" = "vertical";
+  export let onSaved: (() => void) | null = null;
 
   import {
     RadioButtonGroup,
@@ -25,6 +28,7 @@
   let data = null;
   let internalFormValue = null;
   let loaded = false;
+  let lastPosted = null;
 
   export const updateDataOnBackend = () => {
     updateNetwork(internalFormValue);
@@ -33,7 +37,8 @@
   const loadAPIData = async () => {
     try {
       const json = await $store.api.getSetting(keyName);
-      data = json.Value;
+      data = json.Value != null ? json.Value : json.value;
+      lastPosted = data;
     } catch (error) {
       console.error(
         "[GatesentryUI] Unable to load settings (possibly due to logout)",
@@ -51,6 +56,9 @@
       notificationstore.add(
         createNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
       );
+      if (onSaved) {
+        onSaved();
+      }
     }
   };
 
@@ -64,7 +72,14 @@
   };
 
   const updateFieldRadio = async (event) => {
-    internalFormValue = data;
+    const next =
+      event?.detail != null && event.detail !== "" ? event.detail : data;
+    if (next == null || next === lastPosted) {
+      return;
+    }
+    data = next;
+    lastPosted = next;
+    internalFormValue = next;
     if (disableOnblur) return;
     updateNetwork(internalFormValue);
   };
@@ -85,11 +100,18 @@
   {#if type == "radio"}
     <RadioButtonGroup
       legendText={labelText}
+      {orientation}
       bind:selected={data}
       on:change={updateFieldRadio}
     >
-      <RadioButton value="true" labelText={$_("True")} />
-      <RadioButton value="false" labelText={$_("False")} />
+      {#if radioOptions && radioOptions.length > 0}
+        {#each radioOptions as opt}
+          <RadioButton value={opt.value} labelText={opt.label} />
+        {/each}
+      {:else}
+        <RadioButton value="true" labelText={$_("True")} />
+        <RadioButton value="false" labelText={$_("False")} />
+      {/if}
     </RadioButtonGroup>
   {:else if type == "password"}
     <PasswordInput

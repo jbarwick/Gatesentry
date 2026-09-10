@@ -3,6 +3,7 @@ package gatesentryWebserverEndpoints
 import (
 	"encoding/json"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -26,8 +27,11 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 			value = string(valueJson)
 		}
 		return struct{ Value string }{Value: value}
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "enable_dns_filtering", "dns_custom_entries", "dns_domain_lists", "dns_whitelist_domain_lists", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver", "dns_resolver_ipv6", "wpad_enabled", "wpad_proxy_host", "wpad_proxy_port", "wpad_bypass_domain_lists", "dns_local_zone", "ddns_enabled", "ddns_tsig_required", "ddns_tsig_key_name", "ddns_tsig_key_secret", "enable_admin_https", "admin_https_certpem", "admin_https_keypem", "admin_https_capem":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "enable_dns_filtering", "dns_custom_entries", "dns_domain_lists", "dns_whitelist_domain_lists", "ai_scanner_url", "enable_ai_image_filtering", "ai_image_filtering_mode", "ai_grok_api_key", "ai_openai_api_key", "ai_local_llm_url", "ai_local_llm_model", "ai_grok_model", "ai_openai_model", "EnableUsers", "dns_resolver", "dns_resolver_ipv6", "wpad_enabled", "wpad_proxy_host", "wpad_proxy_port", "wpad_bypass_domain_lists", "dns_local_zone", "ddns_enabled", "ddns_tsig_required", "ddns_tsig_key_name", "ddns_tsig_key_secret", "enable_admin_https", "admin_https_certpem", "admin_https_keypem", "admin_https_capem":
 		value := settings.Get(requestedId)
+		if requestedId == "ai_image_filtering_mode" && strings.TrimSpace(value) == "" {
+			value = "disabled"
+		}
 		return struct {
 			Key   string
 			Value string
@@ -85,6 +89,13 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		requestedId == "enable_dns_filtering" ||
 		requestedId == "enable_https_filtering" ||
 		requestedId == "enable_ai_image_filtering" ||
+		requestedId == "ai_image_filtering_mode" ||
+		requestedId == "ai_grok_api_key" ||
+		requestedId == "ai_openai_api_key" ||
+		requestedId == "ai_local_llm_url" ||
+		requestedId == "ai_local_llm_model" ||
+		requestedId == "ai_grok_model" ||
+		requestedId == "ai_openai_model" ||
 		requestedId == "ai_scanner_url" ||
 		requestedId == "EnableUsers" ||
 		requestedId == "strictness" ||
@@ -140,7 +151,35 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 				return temp
 			}
 		}
+		if requestedId == "ai_image_filtering_mode" {
+			v := strings.ToLower(strings.TrimSpace(temp.Value))
+			switch v {
+			case "disabled", "grok", "chatgpt", "local":
+				temp.Value = v
+			default:
+				temp.Value = "ERROR: mode must be disabled, grok, chatgpt, or local"
+				return temp
+			}
+		}
+		if requestedId == "ai_local_llm_url" {
+			v := strings.TrimSpace(temp.Value)
+			temp.Value = v
+			if v != "" {
+				u, err := url.Parse(v)
+				if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+					temp.Value = "ERROR: Local LLM URL must be http or https with a host"
+					return temp
+				}
+			}
+		}
 		settings.Update(requestedId, temp.Value)
+		if requestedId == "ai_image_filtering_mode" {
+			if temp.Value == "disabled" {
+				settings.Update("enable_ai_image_filtering", "false")
+			} else {
+				settings.Update("enable_ai_image_filtering", "true")
+			}
+		}
 		if requestedId == "dns_resolver" {
 			gatesentryDnsServer.SetExternalResolver(temp.Value)
 		}

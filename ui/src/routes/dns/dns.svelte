@@ -24,6 +24,7 @@
   import { onMount } from "svelte";
   import { store } from "../../store/apistore";
   import { getBasePath } from "../../lib/navigate";
+  import { copyToClipboard } from "../../lib/clipboard";
   import { notificationstore } from "../../store/notifications";
   import {
     createNotificationError,
@@ -75,14 +76,16 @@
   async function copySecret() {
     try {
       const json = await $store.api.getSetting("ddns_tsig_key_secret");
-      const val = json?.Value || "";
+      const val = String(
+        json?.Value != null ? json.Value : json?.value || "",
+      ).trim();
       if (!val) {
         copyTooltip = "Nothing to copy";
         setTimeout(() => (copyTooltip = ""), 1500);
         return;
       }
-      await navigator.clipboard.writeText(val);
-      copyTooltip = "Copied!";
+      const ok = await copyToClipboard(val);
+      copyTooltip = ok ? "Copied!" : "Copy failed";
       setTimeout(() => (copyTooltip = ""), 1500);
     } catch {
       copyTooltip = "Copy failed";
@@ -888,9 +891,10 @@
             </div>
             <div class="ddns-copy-wrap">
               <button
+                type="button"
                 class="ddns-copy-btn"
                 title="Copy secret to clipboard"
-                on:click={copySecret}
+                on:click|preventDefault={copySecret}
               >
                 <Copy size={16} />
               </button>

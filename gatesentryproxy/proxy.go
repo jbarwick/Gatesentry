@@ -440,15 +440,21 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 	return
 	// }
 
+	// Outbound calls GateSentry itself makes (Grok/OpenAI status probes)
+	// must not be filtered if they are intercepted by this proxy.
+	skipContentFilters := PassthroughManagementHost(requestHostname(r))
+
 	// timeblocked, _ := IProxy.RunHandler(FILTER_TIME, "", &EMPTY_BYTES, passthru)
-	timefilterData := GSTimeAccessFilterData{Url: r.URL.String(), User: user}
-	IProxy.TimeAccessHandler(&timefilterData)
-	if timefilterData.FilterResponseAction == string(ProxyActionBlockedTime) {
-		Metrics.BlocksTime.Add(1)
-		passthru.ProxyActionToLog = ProxyActionBlockedTime
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime})
-		sendBlockMessageBytes(w, r, nil, timefilterData.FilterResponse, nil)
-		return
+	if !skipContentFilters {
+		timefilterData := GSTimeAccessFilterData{Url: r.URL.String(), User: user}
+		IProxy.TimeAccessHandler(&timefilterData)
+		if timefilterData.FilterResponseAction == string(ProxyActionBlockedTime) {
+			Metrics.BlocksTime.Add(1)
+			passthru.ProxyActionToLog = ProxyActionBlockedTime
+			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime})
+			sendBlockMessageBytes(w, r, nil, timefilterData.FilterResponse, nil)
+			return
+		}
 	}
 
 	if r.Method == "CONNECT" {
@@ -463,17 +469,19 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	urlFilterData := GSUrlFilterData{Url: r.URL.String(), User: user}
+	if !skipContentFilters {
+		urlFilterData := GSUrlFilterData{Url: r.URL.String(), User: user}
 
-	// isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
-	IProxy.UrlAccessHandler(&urlFilterData)
+		// isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
+		IProxy.UrlAccessHandler(&urlFilterData)
 
-	if urlFilterData.FilterResponseAction == ProxyActionBlockedUrl {
-		Metrics.BlocksURL.Add(1)
-		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
-		sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
-		return
+		if urlFilterData.FilterResponseAction == ProxyActionBlockedUrl {
+			Metrics.BlocksURL.Add(1)
+			passthru.ProxyActionToLog = ProxyActionBlockedUrl
+			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
+			sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
+			return
+		}
 	}
 
 	if r.Method == "CONNECT" {
@@ -485,7 +493,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		requestHost = r.URL.Host
 	}
 
-	shouldBlock, ruleMatch, ruleShouldMITM := CheckProxyRules(requestHost, user)
+	shouldBlock, ruleMatch, ruleShouldMITM := false, interface{}(nil), false
+	if !skipContentFilters {
+		shouldBlock, ruleMatch, ruleShouldMITM = CheckProxyRules(requestHost, user)
+	}
 
 	// For block rules with post-response match criteria (URL patterns,
 	// content-type criteria, or keyword filtering), we cannot short-circuit
@@ -549,10 +560,12 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		passthru.UserData = ruleMatch
 	}
 
-	shouldMitm := IProxy.DoMitm(r.URL.Host)
-
-	if ruleMatched {
-		shouldMitm = ruleShouldMITM
+	shouldMitm := false
+	if !skipContentFilters {
+		shouldMitm = IProxy.DoMitm(r.URL.Host)
+		if ruleMatched {
+			shouldMitm = ruleShouldMITM
+		}
 	}
 
 	if DebugLogging {
@@ -570,7 +583,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_NONE
 	}
 
-	if !ruleMatched {
+	if !skipContentFilters && !ruleMatched {
 		isExceptionUrl := IProxy.IsExceptionUrl(r.URL.String())
 		if isExceptionUrl {
 			action = ACTION_NONE

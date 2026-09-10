@@ -32,7 +32,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "80"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "2.0.0-beta.12"
+var GATESENTRY_VERSION = "2.0.0-beta.20"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -290,15 +290,23 @@ func RunGateSentry() {
 				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedTextContent
 			}
 		} else {
-			if R.GSSettings.Get("enable_ai_image_filtering") == "true" && R.GSSettings.Get("ai_scanner_url") != "" {
-				// application.RunFilter("images", string(gafd.Content), responder)
-				ai_service_url := R.GSSettings.Get("ai_scanner_url")
-				filters.FilterImagesAI(gafd, ai_service_url)
+			// Remote Grok/ChatGPT vision calls are not made on this request
+			// path — a round-trip would stall every image. See AI_FILTERING_PLAN.md.
+			// The only in-line scanner is the optional legacy local HTTP classifier.
+			if filters.ShouldRunLegacyImageScanner(
+				R.GSSettings.Get("ai_image_filtering_mode"),
+				R.GSSettings.Get("enable_ai_image_filtering"),
+				R.GSSettings.Get("ai_scanner_url"),
+			) {
+				filters.FilterImagesAI(gafd, R.GSSettings.Get("ai_scanner_url"))
 			}
 		}
 	}
 
 	ngp.DoMitm = func(host string) bool {
+		if gatesentryproxy.PassthroughManagementHost(host) {
+			return false
+		}
 		enable_filtering := R.GSSettings.Get("enable_https_filtering")
 		if enable_filtering == "true" {
 			responder := &gresponder.GSFilterResponder{Blocked: false}

@@ -26,6 +26,7 @@
     createNotificationError,
   } from "../lib/utils";
   import { getBasePath } from "../lib/navigate";
+  import { copyToClipboard } from "../lib/clipboard";
 
   let proxyHost = "";
   let proxyPort = "10413";
@@ -33,28 +34,6 @@
   let loading = true;
   let saving = false;
   let pacPreview = "";
-
-  // Clipboard fallback for non-HTTPS contexts (navigator.clipboard
-  // requires a secure context). Falls back to the legacy
-  // document.execCommand("copy") approach.
-  function copyToClipboard(text: string) {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-    } else {
-      fallbackCopy(text);
-    }
-  }
-
-  function fallbackCopy(text: string) {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    document.body.removeChild(ta);
-  }
 
   // The admin port comes from the backend — it knows what port it's
   // listening on.  We never use window.location.port because that may

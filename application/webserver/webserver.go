@@ -360,6 +360,10 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	internalServer.Get("/api/ai/status", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiAIStatusGET(w, r, internalSettings)
+	})
+
 	internalServer.Get("/api/users", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		jsonResponse := gatesentryWebserverEndpoints.GSApiUsersGET(runtime.GetAuthUsers())
 		SendJSON(w, jsonResponse)

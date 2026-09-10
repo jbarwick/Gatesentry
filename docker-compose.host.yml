@@ -43,3 +43,11 @@ services:
       # - GS_BASE_PATH=/gatesentry
       # Bind admin on 80 instead of 8080 (nothing else may use :80):
       # - GS_ADMIN_PORT=80
+      # AI presets from host .env. Empty/CHANGE_ME is ignored. /gatesentry/ai can override.
+      - GS_AI_GROK_API_KEY=${GS_AI_GROK_API_KEY:-}
+      - GS_AI_OPENAI_API_KEY=${GS_AI_OPENAI_API_KEY:-}
+      - GS_AI_OLLAMA_URL=${GS_AI_OLLAMA_URL:-}
+      - GS_AI_OLLAMA_MODEL=${GS_AI_OLLAMA_MODEL:-}
+      - GS_AI_GROK_MODEL=${GS_AI_GROK_MODEL:-}
+      - GS_AI_OPENAI_MODEL=${GS_AI_OPENAI_MODEL:-}
+      - GS_AI_IMAGE_FILTERING_MODE=${GS_AI_IMAGE_FILTERING_MODE:-}

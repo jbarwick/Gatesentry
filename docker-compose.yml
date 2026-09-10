@@ -46,5 +46,14 @@ services:
       # - GATESENTRY_DNS_RESOLVER=8.8.8.8:53
       # AAAA/HTTPS/ip6.arpa upstream. Set in the DNS UI, or uncomment:
       # - GATESENTRY_DNS_RESOLVER_IPV6=[2001:4860:4860::8888]:53
+      # AI presets from host .env. Empty/CHANGE_ME is ignored. The /gatesentry/ai
+      # page can change stored values; a later start will not overwrite them.
+      - GS_AI_GROK_API_KEY=${GS_AI_GROK_API_KEY:-}
+      - GS_AI_OPENAI_API_KEY=${GS_AI_OPENAI_API_KEY:-}
+      - GS_AI_OLLAMA_URL=${GS_AI_OLLAMA_URL:-}
+      - GS_AI_OLLAMA_MODEL=${GS_AI_OLLAMA_MODEL:-}
+      - GS_AI_GROK_MODEL=${GS_AI_GROK_MODEL:-}
+      - GS_AI_OPENAI_MODEL=${GS_AI_OPENAI_MODEL:-}
+      - GS_AI_IMAGE_FILTERING_MODE=${GS_AI_IMAGE_FILTERING_MODE:-}
       # - GS_TRANSPARENT_PROXY=false
       # - GS_DEBUG_LOGGING=true
