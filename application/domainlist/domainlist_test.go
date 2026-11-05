@@ -102,7 +102,7 @@ func TestIndexRemoveList(t *testing.T) {
 	if idx.IsDomainInList("only-in-1.com", "list1") {
 		t.Error("only-in-1.com should not be in index after list1 removal")
 	}
-	if _, ok := idx.domains["only-in-1.com"]; ok {
+	if idx.GetListsForDomain("only-in-1.com") != nil {
 		t.Error("only-in-1.com should be cleaned up from domains map entirely")
 	}
 }
