@@ -172,6 +172,38 @@ func (idx *DomainListIndex) CountForList(listID string) int {
 	return count
 }
 
+// CountForLists returns the number of unique domains that belong to any of
+// the given list IDs. Domains that appear only on other lists are excluded.
+// An empty selection returns 0.
+func (idx *DomainListIndex) CountForLists(listIDs []string) int {
+	if idx == nil || len(listIDs) == 0 {
+		return 0
+	}
+	want := make(map[string]struct{}, len(listIDs))
+	for _, id := range listIDs {
+		if id != "" {
+			want[id] = struct{}{}
+		}
+	}
+	if len(want) == 0 {
+		return 0
+	}
+
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	count := 0
+	for _, lists := range idx.domains {
+		for id := range lists {
+			if _, ok := want[id]; ok {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
 // Clear removes all entries from the index.
 func (idx *DomainListIndex) Clear() {
 	idx.mu.Lock()

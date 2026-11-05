@@ -137,6 +137,32 @@ func TestIndexTotalDomains(t *testing.T) {
 	}
 }
 
+func TestIndexCountForLists(t *testing.T) {
+	idx := NewDomainListIndex()
+	idx.AddDomains("block-a", []string{"a.com", "shared.com"})
+	idx.AddDomains("block-b", []string{"shared.com", "b.com"})
+	idx.AddDomains("unused", []string{"other.com", "a.com"})
+
+	// Unique domains on the enabled block lists only. shared.com counts once.
+	// other.com is only on a list that is not enabled.
+	if got := idx.CountForLists([]string{"block-a", "block-b"}); got != 3 {
+		t.Errorf("CountForLists(enabled) = %d, want 3", got)
+	}
+	if got := idx.CountForLists(nil); got != 0 {
+		t.Errorf("CountForLists(nil) = %d, want 0", got)
+	}
+	if got := idx.CountForLists([]string{"", "missing"}); got != 0 {
+		t.Errorf("CountForLists(unknown) = %d, want 0", got)
+	}
+	if got := idx.TotalDomains(); got != 4 {
+		t.Errorf("TotalDomains() = %d, want 4", got)
+	}
+	var nilIdx *DomainListIndex
+	if got := nilIdx.CountForLists([]string{"block-a"}); got != 0 {
+		t.Errorf("nil CountForLists() = %d, want 0", got)
+	}
+}
+
 func TestIndexGetListsForDomain(t *testing.T) {
 	idx := NewDomainListIndex()
 

@@ -99,6 +99,7 @@ var dnsFilteringEnabled atomic.Bool
 // domainListMgr is the shared DomainListManager, set during StartDNSServer.
 // Used for O(1) domain blocklist/whitelist lookups via the shared index.
 var domainListMgr *gatesentryDomainList.DomainListManager
+var dnsServerInfo *gatesentryTypes.DnsServerInfo
 
 // settings is the shared settings store, set during StartDNSServer.
 // Used to read dns_domain_lists and dns_whitelist_domain_lists.
@@ -321,6 +322,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 
 	// Store shared references for use in handleDNSRequest
 	domainListMgr = dlManager
+	dnsServerInfo = dnsinfo
 	dnsSettings = settings
 	RefreshDNSListIDs()
 	registerApplianceNames(settings)
@@ -597,8 +599,26 @@ func getDomainListIDs(key string) []string {
 // RefreshDNSListIDs re-parses dns_domain_lists / whitelist IDs from settings.
 // Call after those settings change and at DNS server start.
 func RefreshDNSListIDs() {
-	cachedBlockListIDs.Store(getDomainListIDs("dns_domain_lists"))
+	blockIDs := getDomainListIDs("dns_domain_lists")
+	cachedBlockListIDs.Store(blockIDs)
 	cachedAllowListIDs.Store(getDomainListIDs("dns_whitelist_domain_lists"))
+	recountBlockedDomains(blockIDs)
+}
+
+// recountBlockedDomains updates the Domain Totals figure after the Block
+// Lists selection changes. It counts unique domains on those lists only.
+// Before the first list load the index is empty, so the scheduler's count
+// after LoadAllLists remains the source of the initial total.
+func recountBlockedDomains(blockIDs []string) {
+	if dnsServerInfo == nil || domainListMgr == nil || domainListMgr.Index == nil {
+		return
+	}
+	if domainListMgr.Index.TotalDomains() == 0 {
+		return
+	}
+	n := domainListMgr.Index.CountForLists(blockIDs)
+	dnsServerInfo.NumberDomainsBlocked = n
+	log.Printf("[DNS] Block-list domain total: %d (%d lists)", n, len(blockIDs))
 }
 
 func loadCachedListIDs(v atomic.Value) []string {

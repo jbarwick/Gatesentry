@@ -1,7 +1,9 @@
 package gatesentryDnsScheduler
 
 import (
+	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,10 +62,39 @@ func doInitialize(blockedDomains *map[string]bool,
 	if dlManager != nil {
 		log.Println("[DNS Scheduler] Refreshing domain lists via DomainListManager...")
 		dlManager.LoadAllLists()
-		dnsinfo.NumberDomainsBlocked = dlManager.Index.TotalDomains()
-		log.Printf("[DNS Scheduler] Domain list refresh complete. Total indexed domains: %d", dnsinfo.NumberDomainsBlocked)
+		// Domain Totals counts unique domains on the lists assigned in the
+		// Block Lists section (dns_domain_lists). Other stored lists stay
+		// in the index for rules and the domain-list catalog.
+		ids := blockListIDs(settings)
+		dnsinfo.NumberDomainsBlocked = enabledBlockDomainCount(dlManager, ids)
+		log.Printf("[DNS Scheduler] Domain list refresh complete. Enabled block-list domains: %d (%d lists)", dnsinfo.NumberDomainsBlocked, len(ids))
 	}
 
 	dnsinfo.NextUpdate = int(time.Now().Add(time.Hour * time.Duration(updateIntervalHourly)).Unix())
 	dnsinfo.LastUpdated = int(time.Now().Unix())
+}
+
+// blockListIDs reads the Block Lists selection. An empty or invalid value
+// means no lists are enabled, so the Domain Totals count is zero.
+func blockListIDs(settings *gatesentry2storage.MapStore) []string {
+	if settings == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(settings.Get("dns_domain_lists"))
+	if raw == "" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		log.Printf("[DNS Scheduler] Error parsing dns_domain_lists: %v", err)
+		return nil
+	}
+	return ids
+}
+
+func enabledBlockDomainCount(dlManager *gatesentryDomainList.DomainListManager, listIDs []string) int {
+	if dlManager == nil || dlManager.Index == nil {
+		return 0
+	}
+	return dlManager.Index.CountForLists(listIDs)
 }
