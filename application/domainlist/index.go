@@ -3,12 +3,11 @@ package domainlist
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
-// indexShards keeps a list rebuild from holding every lookup.
-// A Test Domain check locks only the shard for that name. A list refresh
-// updates one shard at a time, so a lookup waits for one shard, not for
-// the whole multi-million-name list to be inserted.
+// indexShards spreads names so a list refresh copies one slice at a time.
+// Lookups never take that lock. They read the snapshot already published.
 const indexShards = 64
 
 // parentDomains returns the domain and its parents down to 2 labels
@@ -35,33 +34,81 @@ func parentDomains(domain string) []string {
 
 func shardIndex(domain string) uint {
 	var h uint32 = 2166136261
-	for i := 0; i < len(domain); i++ {
+	for i := range len(domain) {
 		h ^= uint32(domain[i])
 		h *= 16777619
 	}
 	return uint(h % indexShards)
 }
 
-type indexShard struct {
-	mu      sync.RWMutex
+// shardSnap is immutable once published. Writers clone it and store a new
+// pointer. Readers load the pointer and do not lock, so a DNS query does
+// not wait while a domain list is rebuilt.
+type shardSnap struct {
 	domains map[string]map[string]bool
 	byList  map[string]map[string]struct{}
 }
 
-func (s *indexShard) ensureLocked() {
-	if s.domains == nil {
-		s.domains = make(map[string]map[string]bool)
+var emptySnap = &shardSnap{
+	domains: map[string]map[string]bool{},
+	byList:  map[string]map[string]struct{}{},
+}
+
+type indexShard struct {
+	mu   sync.Mutex // writers only
+	snap atomic.Pointer[shardSnap]
+}
+
+func (s *indexShard) load() *shardSnap {
+	p := s.snap.Load()
+	if p == nil {
+		return emptySnap
 	}
-	if s.byList == nil {
-		s.byList = make(map[string]map[string]struct{})
+	return p
+}
+
+func (s *indexShard) publish(next *shardSnap) {
+	s.snap.Store(next)
+}
+
+func cloneSnap(old *shardSnap) *shardSnap {
+	if old == nil {
+		old = emptySnap
 	}
+	next := &shardSnap{
+		domains: make(map[string]map[string]bool, len(old.domains)),
+		byList:  make(map[string]map[string]struct{}, len(old.byList)),
+	}
+	for domain, lists := range old.domains {
+		next.domains[domain] = lists
+	}
+	for id, set := range old.byList {
+		next.byList[id] = set
+	}
+	return next
+}
+
+func cloneListSet(in map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(in)+1)
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneDomainSet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in)+1)
+	for k := range in {
+		out[k] = struct{}{}
+	}
+	return out
 }
 
 // DomainListIndex provides O(1) domain lookup across all loaded domain lists.
 // It maps each domain to the set of list IDs that contain it.
 //
-// The index is split into shards so a lookup does not wait for another list
-// to finish loading.
+// Each shard publishes an immutable snapshot. A lookup loads that snapshot
+// and does not wait for a list refresh.
 type DomainListIndex struct {
 	shards [indexShards]indexShard
 }
@@ -72,18 +119,14 @@ func NewDomainListIndex() *DomainListIndex {
 }
 
 // IsDomainInList checks whether a domain is present in a specific list.
-// O(1) lookup. Thread-safe for concurrent reads.
+// O(1) lookup. Does not wait on a list refresh.
 func (idx *DomainListIndex) IsDomainInList(domain string, listID string) bool {
 	if idx == nil {
 		return false
 	}
 	for _, d := range parentDomains(domain) {
-		s := &idx.shards[shardIndex(d)]
-		s.mu.RLock()
-		lists := s.domains[d]
-		found := lists != nil && lists[listID]
-		s.mu.RUnlock()
-		if found {
+		lists := idx.shards[shardIndex(d)].load().domains[d]
+		if lists != nil && lists[listID] {
 			return true
 		}
 	}
@@ -92,42 +135,32 @@ func (idx *DomainListIndex) IsDomainInList(domain string, listID string) bool {
 
 // IsDomainInAnyList checks whether a domain (or a parent zone) is present in
 // ANY of the given lists. Returns true on first match.
+// Does not wait on a list refresh.
 func (idx *DomainListIndex) IsDomainInAnyList(domain string, listIDs []string) bool {
 	if idx == nil || len(listIDs) == 0 {
 		return false
 	}
 	for _, d := range parentDomains(domain) {
-		s := &idx.shards[shardIndex(d)]
-		s.mu.RLock()
-		lists := s.domains[d]
-		found := false
-		if lists != nil {
-			for _, id := range listIDs {
-				if lists[id] {
-					found = true
-					break
-				}
-			}
+		lists := idx.shards[shardIndex(d)].load().domains[d]
+		if lists == nil {
+			continue
 		}
-		s.mu.RUnlock()
-		if found {
-			return true
+		for _, id := range listIDs {
+			if lists[id] {
+				return true
+			}
 		}
 	}
 	return false
 }
 
 // GetListsForDomain returns the set of list IDs that contain the given domain.
-// Returns nil if the domain is not indexed. Thread-safe.
+// Returns nil if the domain is not indexed. Does not wait on a list refresh.
 func (idx *DomainListIndex) GetListsForDomain(domain string) map[string]bool {
 	if idx == nil {
 		return nil
 	}
-	s := &idx.shards[shardIndex(domain)]
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	lists := s.domains[domain]
+	lists := idx.shards[shardIndex(domain)].load().domains[domain]
 	if lists == nil {
 		return nil
 	}
@@ -152,19 +185,21 @@ func (idx *DomainListIndex) AddDomains(listID string, domains []string) {
 		}
 		s := &idx.shards[i]
 		s.mu.Lock()
-		s.ensureLocked()
-		known := s.byList[listID]
-		if known == nil {
-			known = make(map[string]struct{})
-			s.byList[listID] = known
-		}
+		next := cloneSnap(s.load())
+		known := cloneDomainSet(next.byList[listID])
 		for domain := range fresh {
-			if s.domains[domain] == nil {
-				s.domains[domain] = make(map[string]bool)
+			lists := next.domains[domain]
+			if lists[listID] {
+				known[domain] = struct{}{}
+				continue
 			}
-			s.domains[domain][listID] = true
+			copied := cloneListSet(lists)
+			copied[listID] = true
+			next.domains[domain] = copied
 			known[domain] = struct{}{}
 		}
+		next.byList[listID] = known
+		s.publish(next)
 		s.mu.Unlock()
 	}
 }
@@ -178,24 +213,36 @@ func (idx *DomainListIndex) RemoveList(listID string) {
 	for i := range idx.shards {
 		s := &idx.shards[i]
 		s.mu.Lock()
-		if s.byList != nil {
-			for domain := range s.byList[listID] {
-				lists := s.domains[domain]
-				delete(lists, listID)
-				if len(lists) == 0 {
-					delete(s.domains, domain)
-				}
-			}
-			delete(s.byList, listID)
+		old := s.load()
+		if _, ok := old.byList[listID]; !ok {
+			s.mu.Unlock()
+			continue
 		}
+		next := cloneSnap(old)
+		for domain := range next.byList[listID] {
+			lists := next.domains[domain]
+			if len(lists) == 1 && lists[listID] {
+				delete(next.domains, domain)
+				continue
+			}
+			copied := cloneListSet(lists)
+			delete(copied, listID)
+			if len(copied) == 0 {
+				delete(next.domains, domain)
+			} else {
+				next.domains[domain] = copied
+			}
+		}
+		delete(next.byList, listID)
+		s.publish(next)
 		s.mu.Unlock()
 	}
 }
 
 // ReplaceList removes all domains for a list and adds new ones.
-// Shards are updated one at a time so a lookup is not blocked for the
-// whole list. A name that is in both the old and new set stays indexed
-// for the whole call.
+// Each shard is published on its own. A name that is in both the old and
+// new set stays in the snapshot readers already have, and in the new one.
+// Lookups do not wait for this call.
 func (idx *DomainListIndex) ReplaceList(listID string, domains []string) {
 	if idx == nil {
 		return
@@ -205,33 +252,46 @@ func (idx *DomainListIndex) ReplaceList(listID string, domains []string) {
 		s := &idx.shards[i]
 		fresh := grouped[i]
 		s.mu.Lock()
-		s.ensureLocked()
-		old := s.byList[listID]
-		for domain := range old {
+		old := s.load()
+		prev := old.byList[listID]
+		if len(prev) == 0 && len(fresh) == 0 {
+			s.mu.Unlock()
+			continue
+		}
+		next := cloneSnap(old)
+		for domain := range prev {
 			if _, keep := fresh[domain]; keep {
 				continue
 			}
-			lists := s.domains[domain]
-			delete(lists, listID)
-			if len(lists) == 0 {
-				delete(s.domains, domain)
+			lists := next.domains[domain]
+			if len(lists) == 1 && lists[listID] {
+				delete(next.domains, domain)
+				continue
+			}
+			copied := cloneListSet(lists)
+			delete(copied, listID)
+			if len(copied) == 0 {
+				delete(next.domains, domain)
+			} else {
+				next.domains[domain] = copied
 			}
 		}
 		if len(fresh) == 0 {
-			delete(s.byList, listID)
+			delete(next.byList, listID)
+			s.publish(next)
 			s.mu.Unlock()
 			continue
 		}
 		for domain := range fresh {
-			if _, already := old[domain]; already {
+			if _, already := prev[domain]; already {
 				continue
 			}
-			if s.domains[domain] == nil {
-				s.domains[domain] = make(map[string]bool)
-			}
-			s.domains[domain][listID] = true
+			copied := cloneListSet(next.domains[domain])
+			copied[listID] = true
+			next.domains[domain] = copied
 		}
-		s.byList[listID] = fresh
+		next.byList[listID] = fresh
+		s.publish(next)
 		s.mu.Unlock()
 	}
 }
@@ -243,10 +303,7 @@ func (idx *DomainListIndex) TotalDomains() int {
 	}
 	total := 0
 	for i := range idx.shards {
-		s := &idx.shards[i]
-		s.mu.RLock()
-		total += len(s.domains)
-		s.mu.RUnlock()
+		total += len(idx.shards[i].load().domains)
 	}
 	return total
 }
@@ -258,10 +315,7 @@ func (idx *DomainListIndex) CountForList(listID string) int {
 	}
 	count := 0
 	for i := range idx.shards {
-		s := &idx.shards[i]
-		s.mu.RLock()
-		count += len(s.byList[listID])
-		s.mu.RUnlock()
+		count += len(idx.shards[i].load().byList[listID])
 	}
 	return count
 }
@@ -285,9 +339,7 @@ func (idx *DomainListIndex) CountForLists(listIDs []string) int {
 
 	count := 0
 	for i := range idx.shards {
-		s := &idx.shards[i]
-		s.mu.RLock()
-		for _, lists := range s.domains {
+		for _, lists := range idx.shards[i].load().domains {
 			for id := range lists {
 				if _, ok := want[id]; ok {
 					count++
@@ -295,7 +347,6 @@ func (idx *DomainListIndex) CountForLists(listIDs []string) int {
 				}
 			}
 		}
-		s.mu.RUnlock()
 	}
 	return count
 }
@@ -308,8 +359,7 @@ func (idx *DomainListIndex) Clear() {
 	for i := range idx.shards {
 		s := &idx.shards[i]
 		s.mu.Lock()
-		s.domains = make(map[string]map[string]bool)
-		s.byList = make(map[string]map[string]struct{})
+		s.publish(emptySnap)
 		s.mu.Unlock()
 	}
 }

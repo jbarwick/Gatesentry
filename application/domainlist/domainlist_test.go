@@ -1,7 +1,9 @@
 package domainlist
 
 import (
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
@@ -191,6 +193,59 @@ func TestIndexClear(t *testing.T) {
 
 	if got := idx.TotalDomains(); got != 0 {
 		t.Errorf("TotalDomains() after Clear() = %d, want 0", got)
+	}
+}
+
+// A lookup runs against the published snapshot. Replacing a large list
+// must not make an unchanged name disappear, and must not race with readers.
+func TestLookupDuringReplace(t *testing.T) {
+	idx := NewDomainListIndex()
+	idx.AddDomains("list", []string{"keep.example.com", "old.example.com"})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errCh := make(chan string, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if !idx.IsDomainInList("keep.example.com", "list") {
+				select {
+				case errCh <- "keep.example.com disappeared during replace":
+				default:
+				}
+				return
+			}
+			_ = idx.IsDomainInAnyList("keep.example.com", []string{"list"})
+		}
+	}()
+
+	next := make([]string, 0, 20001)
+	next = append(next, "keep.example.com")
+	for i := range 20000 {
+		next = append(next, fmt.Sprintf("n%d.example.com", i))
+	}
+	idx.ReplaceList("list", next)
+	close(stop)
+	wg.Wait()
+	select {
+	case msg := <-errCh:
+		t.Fatal(msg)
+	default:
+	}
+	if idx.IsDomainInList("old.example.com", "list") {
+		t.Error("old.example.com should be gone after replace")
+	}
+	if !idx.IsDomainInList("n1.example.com", "list") {
+		t.Error("n1.example.com should be indexed after replace")
+	}
+	if got := idx.CountForList("list"); got != 20001 {
+		t.Errorf("CountForList = %d, want 20001", got)
 	}
 }
 
