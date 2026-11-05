@@ -67,6 +67,10 @@
   let listsLoaded = false;
   let showPicker = false;
   let pickerMode: "block" | "allow" = "block";
+  let testDomain = "";
+  let testResult: "" | "allowed" | "blocked" = "";
+  let testError = "";
+  let testBusy = false;
 
   function getHeaders() {
     const token = localStorage.getItem("jwt");
@@ -216,6 +220,29 @@
   async function removeAllowList(id: string) {
     allowListIds = allowListIds.filter((i) => i !== id);
     await saveAllowListIds();
+  }
+
+  async function runDomainTest() {
+    testError = "";
+    testResult = "";
+    const name = testDomain.trim();
+    if (!name) {
+      testError = "Enter a domain name";
+      return;
+    }
+    testBusy = true;
+    try {
+      const json = await $store.api.doCall("/dns/test", "post", { domain: name });
+      if (!json || json.error) {
+        testError = (json && json.error) || "Test failed";
+        return;
+      }
+      testResult = json.blocked ? "blocked" : "allowed";
+    } catch {
+      testError = "Test failed";
+    } finally {
+      testBusy = false;
+    }
   }
 
   // ── Custom A/AAAA Records (Server tab) ──
@@ -689,6 +716,42 @@
       </div>
     </div>
   {/if}
+
+  <div class="gs-section">
+    <div class="gs-card">
+      <h5>Test Domain</h5>
+      <p class="dns-list-hint">
+        Check a name against the Block Lists. A name on an Allow List is
+        allowed even when a Block List also matches it.
+      </p>
+      <div class="dns-test-row">
+        <TextInput
+          labelText="Domain"
+          placeholder="example.com"
+          size="sm"
+          bind:value={testDomain}
+          on:keydown={(e) => {
+            if (e.key === "Enter") runDomainTest();
+          }}
+        />
+        <Button
+          size="small"
+          kind="primary"
+          disabled={testBusy || !testDomain.trim()}
+          on:click={runDomainTest}
+        >
+          Test
+        </Button>
+      </div>
+      {#if testError}
+        <p class="dns-test-error">{testError}</p>
+      {:else if testResult === "allowed"}
+        <p class="dns-test-allowed">Domain Allowed</p>
+      {:else if testResult === "blocked"}
+        <p class="dns-test-blocked">Domain Blocked</p>
+      {/if}
+    </div>
+  </div>
 {/if}
 
 <!-- ═══════ TAB 2: SERVER ═══════ -->
@@ -977,6 +1040,32 @@
     color: #6f6f6f;
     line-height: 1.4;
     margin-top: 2px;
+  }
+
+  .dns-test-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+    max-width: 480px;
+  }
+  .dns-test-row :global(.bx--form-item) {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  .dns-test-allowed,
+  .dns-test-blocked,
+  .dns-test-error {
+    margin: 12px 0 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  .dns-test-allowed {
+    color: #198038;
+  }
+  .dns-test-blocked,
+  .dns-test-error {
+    color: #da1e28;
   }
 
   /* ── Row content ── */

@@ -747,14 +747,29 @@ func selfAnswers(qname string, qtype uint16) []dns.RR {
 	return out
 }
 
+// onAllowList reports whether domain, or one of its parent zones, is on an
+// Allow List (dns_whitelist_domain_lists). An Allow List match is an
+// automatic allow and wins over every Block List match.
+func onAllowList(domain string) bool {
+	if domainListMgr == nil || domainListMgr.Index == nil {
+		return false
+	}
+	ids := loadCachedListIDs(cachedAllowListIDs)
+	return len(ids) > 0 && domainListMgr.Index.IsDomainInAnyList(domain, ids)
+}
+
 // isDomainBlocked checks whether a domain should be blocked by DNS filtering.
 // A domain is blocked when:
-//  1. It appears in ANY domain list referenced by dns_domain_lists, AND
-//  2. It does NOT appear in ANY domain list referenced by dns_whitelist_domain_lists.
+//  1. It is not on any Allow List (including a parent zone), AND
+//  2. It appears in ANY domain list referenced by dns_domain_lists.
 //
 // Uses the shared DomainListIndex for O(1) lookups. Falls back to the legacy
 // blockedDomains map if no DomainListManager is available (graceful degradation).
 func isDomainBlocked(domain string) bool {
+	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+	if onAllowList(domain) {
+		return false
+	}
 	if domainListMgr == nil || domainListMgr.Index == nil {
 		// Fallback to legacy map for backwards compatibility
 		mutex.RLock()
@@ -777,6 +792,49 @@ func isDomainBlocked(domain string) bool {
 	}
 
 	return true
+}
+
+// DomainFilterResult is the DNS filter decision for one name.
+type DomainFilterResult struct {
+	Domain  string `json:"domain"`
+	Blocked bool   `json:"blocked"`
+}
+
+// EvaluateDomainFilter reports whether DNS filtering would block raw.
+// Allow List matches are allowed. When filtering is disabled, nothing is blocked.
+func EvaluateDomainFilter(raw string) (DomainFilterResult, error) {
+	domain, err := normalizeFilterDomain(raw)
+	if err != nil {
+		return DomainFilterResult{}, err
+	}
+	if !dnsFilteringEnabled.Load() {
+		return DomainFilterResult{Domain: domain, Blocked: false}, nil
+	}
+	return DomainFilterResult{Domain: domain, Blocked: isDomainBlocked(domain)}, nil
+}
+
+func normalizeFilterDomain(raw string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if i := strings.Index(s, "://"); i >= 0 {
+		rest := s[i+3:]
+		if cut := strings.IndexAny(rest, "/?#"); cut >= 0 {
+			rest = rest[:cut]
+		}
+		if h, _, err := net.SplitHostPort(rest); err == nil {
+			rest = h
+		}
+		s = rest
+	}
+	s = strings.TrimSuffix(s, ".")
+	if s == "" || len(s) > 253 || strings.ContainsAny(s, " \t/\\?#") {
+		return "", fmt.Errorf("enter a domain name")
+	}
+	for _, label := range strings.Split(s, ".") {
+		if label == "" || len(label) > 63 {
+			return "", fmt.Errorf("enter a domain name")
+		}
+	}
+	return s, nil
 }
 
 // isReverseDomain returns true if the domain is a PTR reverse-lookup name.

@@ -501,6 +501,10 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	internalServer.Post("/api/dns/test", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSTestDomain(w, r)
+	})
+
 	internalServer.Get("/api/dns/custom_entries", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		data := internalSettings.Get("DNS_custom_entries")
 		output := gatesentryWebserverEndpoints.GSApiDNSEntriesCustom(data, internalSettings, runtime)

@@ -647,6 +647,57 @@ func TestHandleDNS_WhitelistOverridesBlocklist(t *testing.T) {
 	}
 }
 
+func TestAllowListIsAutomaticAllow(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	tmpDir := t.TempDir()
+	gatesentry2storage.SetBaseDir(tmpDir + "/")
+
+	dlm := gatesentryDomainList.NewDomainListManager(
+		gatesentry2storage.NewMapStore("test_allow_auto", false),
+	)
+	dlm.Index.AddDomains("block", []string{"ads.example.com", "example.com", "blocked.example"})
+	dlm.Index.AddDomains("allow", []string{"example.com", "safe.blocked.example"})
+
+	domainListMgr = dlm
+	dnsSettings = gatesentry2storage.NewMapStore("test_allow_auto_settings", false)
+	dnsSettings.Update("dns_domain_lists", `["block"]`)
+	dnsSettings.Update("dns_whitelist_domain_lists", `["allow"]`)
+	RefreshDNSListIDs()
+	dnsFilteringEnabled.Store(true)
+
+	// Parent on the Allow List allows the name even when a Block List matches it.
+	if isDomainBlocked("ads.example.com") {
+		t.Error("ads.example.com is on an Allow List parent and must be allowed")
+	}
+	// Exact Allow List match wins over a Block List parent.
+	if isDomainBlocked("safe.blocked.example") {
+		t.Error("safe.blocked.example is on an Allow List and must be allowed")
+	}
+	if !isDomainBlocked("other.blocked.example") {
+		t.Error("other.blocked.example is only on a Block List and must be blocked")
+	}
+
+	got, err := EvaluateDomainFilter("https://Ads.Example.com/path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Domain != "ads.example.com" || got.Blocked {
+		t.Errorf("EvaluateDomainFilter = %+v, want ads.example.com allowed", got)
+	}
+
+	dnsFilteringEnabled.Store(false)
+	got, err = EvaluateDomainFilter("other.blocked.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Blocked {
+		t.Error("filtering disabled must allow the name")
+	}
+	dnsFilteringEnabled.Store(true)
+}
+
 func TestHandleDNS_NoDomainListsFallsBackToLegacy(t *testing.T) {
 	cleanup := setupTestServer(t)
 	defer cleanup()

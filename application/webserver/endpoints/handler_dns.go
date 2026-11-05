@@ -4,12 +4,33 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"strings"
 
+	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
+
+// GSApiDNSTestDomain reports whether DNS filtering would block a name.
+// Allow List matches are allowed.
+func GSApiDNSTestDomain(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Domain string `json:"domain"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "enter a domain name", http.StatusBadRequest)
+		return
+	}
+	result, err := gatesentryDnsServer.EvaluateDomainFilter(body.Domain)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
 
 func GSApiDNSInfo(dnsServerInfo *gatesentryTypes.DnsServerInfo) interface{} {
 
