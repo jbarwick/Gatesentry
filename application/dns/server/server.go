@@ -747,6 +747,47 @@ func selfAnswers(qname string, qtype uint16) []dns.RR {
 	return out
 }
 
+// domainFilterDecision is the filter step shared by live DNS queries and
+// Test Domain. A list refresh does not stall it: the index read uses the
+// snapshot already published.
+type domainFilterDecision struct {
+	blocked   bool
+	exception bool
+}
+
+// decideDomainFilter reports whether a normalized DNS name is blocked.
+// An Allow List match, including a parent zone, is an automatic allow.
+// A legacy exception domain is allowed. Filtering disabled allows every name.
+func decideDomainFilter(domain string) domainFilterDecision {
+	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+	if domain == "" {
+		return domainFilterDecision{}
+	}
+	mutex.RLock()
+	exception := exceptionDomains[domain]
+	legacyBlocked := blockedDomains[domain]
+	mutex.RUnlock()
+	if exception {
+		return domainFilterDecision{exception: true}
+	}
+	if !dnsFilteringEnabled.Load() {
+		return domainFilterDecision{}
+	}
+	if onAllowList(domain) {
+		return domainFilterDecision{}
+	}
+	if domainListMgr == nil || domainListMgr.Index == nil {
+		return domainFilterDecision{blocked: legacyBlocked}
+	}
+	blockListIDs := loadCachedListIDs(cachedBlockListIDs)
+	if len(blockListIDs) == 0 {
+		return domainFilterDecision{}
+	}
+	return domainFilterDecision{
+		blocked: domainListMgr.Index.IsDomainInAnyList(domain, blockListIDs),
+	}
+}
+
 // onAllowList reports whether domain, or one of its parent zones, is on an
 // Allow List (dns_whitelist_domain_lists). An Allow List match is an
 // automatic allow and wins over every Block List match.
@@ -758,40 +799,9 @@ func onAllowList(domain string) bool {
 	return len(ids) > 0 && domainListMgr.Index.IsDomainInAnyList(domain, ids)
 }
 
-// isDomainBlocked checks whether a domain should be blocked by DNS filtering.
-// A domain is blocked when:
-//  1. It is not on any Allow List (including a parent zone), AND
-//  2. It appears in ANY domain list referenced by dns_domain_lists.
-//
-// Uses the shared DomainListIndex for O(1) lookups. Falls back to the legacy
-// blockedDomains map if no DomainListManager is available (graceful degradation).
+// isDomainBlocked is the block bit of the shared filter decision.
 func isDomainBlocked(domain string) bool {
-	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
-	if onAllowList(domain) {
-		return false
-	}
-	if domainListMgr == nil || domainListMgr.Index == nil {
-		// Fallback to legacy map for backwards compatibility
-		mutex.RLock()
-		blocked := blockedDomains[domain]
-		mutex.RUnlock()
-		return blocked
-	}
-
-	blockListIDs := loadCachedListIDs(cachedBlockListIDs)
-	if len(blockListIDs) == 0 {
-		return false
-	}
-	if !domainListMgr.Index.IsDomainInAnyList(domain, blockListIDs) {
-		return false
-	}
-
-	whitelistIDs := loadCachedListIDs(cachedAllowListIDs)
-	if len(whitelistIDs) > 0 && domainListMgr.Index.IsDomainInAnyList(domain, whitelistIDs) {
-		return false
-	}
-
-	return true
+	return decideDomainFilter(domain).blocked
 }
 
 // DomainFilterResult is the DNS filter decision for one name.
@@ -800,17 +810,15 @@ type DomainFilterResult struct {
 	Blocked bool   `json:"blocked"`
 }
 
-// EvaluateDomainFilter reports whether DNS filtering would block raw.
-// Allow List matches are allowed. When filtering is disabled, nothing is blocked.
+// EvaluateDomainFilter reports the live DNS filter decision for raw.
+// raw may be a host or an http(s) URL. The block bit is decideDomainFilter,
+// the same function a real query uses.
 func EvaluateDomainFilter(raw string) (DomainFilterResult, error) {
 	domain, err := normalizeFilterDomain(raw)
 	if err != nil {
 		return DomainFilterResult{}, err
 	}
-	if !dnsFilteringEnabled.Load() {
-		return DomainFilterResult{Domain: domain, Blocked: false}, nil
-	}
-	return DomainFilterResult{Domain: domain, Blocked: isDomainBlocked(domain)}, nil
+	return DomainFilterResult{Domain: domain, Blocked: decideDomainFilter(domain).blocked}, nil
 }
 
 func normalizeFilterDomain(raw string) (string, error) {

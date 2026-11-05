@@ -113,14 +113,12 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		}
 
-		// 5. Filters (allow exception, then block lists)
-		mutex.RLock()
-		isException := exceptionDomains[domain]
-		mutex.RUnlock()
-		if isException {
+		// 5. Same filter decision as Test Domain.
+		decision := decideDomainFilter(domain)
+		if decision.exception {
 			dnsMetrics.QueriesException.Add(1)
 			noteQuery(domain, qtype, "exception", false)
-		} else if dnsFilteringEnabled.Load() && isDomainBlocked(domain) {
+		} else if decision.blocked {
 			dnsMetrics.QueriesBlocked.Add(1)
 			answers := selfAnswers(q.Name, qtype)
 			if len(answers) == 0 && localIp != "" {

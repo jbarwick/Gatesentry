@@ -692,10 +692,50 @@ func TestAllowListIsAutomaticAllow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Blocked {
-		t.Error("filtering disabled must allow the name")
+	if got.Blocked || isDomainBlocked("other.blocked.example") {
+		t.Error("filtering disabled must allow the name for Test Domain and live queries")
 	}
 	dnsFilteringEnabled.Store(true)
+}
+
+func TestLiveQueryMatchesTestDomain(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	dnsFilteringEnabled.Store(true)
+	blockedDomains["blocked.example"] = true
+	blockedDomains["except.example"] = true
+	exceptionDomains["except.example"] = true
+	t.Cleanup(func() { dnsFilteringEnabled.Store(true) })
+
+	same := func(name string, want bool) {
+		t.Helper()
+		got, err := EvaluateDomainFilter(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Blocked != want || isDomainBlocked(name) != want {
+			t.Fatalf("%s: Test Domain blocked=%v live blocked=%v, want %v", name, got.Blocked, isDomainBlocked(name), want)
+		}
+	}
+	same("blocked.example", true)
+	same("except.example", false)
+
+	req := new(dns.Msg)
+	req.SetQuestion("blocked.example.", dns.TypeA)
+	w := newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(w, req)
+	if w.msg == nil || len(w.msg.Answer) < 1 {
+		t.Fatalf("live query did not block blocked.example: %+v", w.msg)
+	}
+
+	req = new(dns.Msg)
+	req.SetQuestion("except.example.", dns.TypeA)
+	w = newMockResponseWriter("192.0.2.50")
+	handleDNSRequest(w, req)
+	if w.msg != nil && w.msg.Rcode == dns.RcodeSuccess && len(w.msg.Answer) > 0 {
+		t.Fatalf("exception name was answered locally: %+v", w.msg.Answer)
+	}
 }
 
 func TestHandleDNS_NoDomainListsFallsBackToLegacy(t *testing.T) {
