@@ -25,6 +25,10 @@
   import { store } from "../../store/apistore";
   import { getBasePath } from "../../lib/navigate";
   import { copyToClipboard } from "../../lib/clipboard";
+  import {
+    assignedListRows,
+    listsAvailableToAssign,
+  } from "../../lib/dnsListAssign";
   import { notificationstore } from "../../store/notifications";
   import {
     createNotificationError,
@@ -132,27 +136,14 @@
     }
   }
 
-  function findList(id: string) {
-    return allLists.find((l) => l.id === id);
-  }
-
-  function buildDisplayList(ids: string[]) {
-    return ids.map((id) => {
-      const list = findList(id);
-      return {
-        id,
-        name: list ? list.name : id,
-        source: list ? list.source : "—",
-        category: list ? list.category || "" : "",
-        entry_count: list ? list.entry_count || 0 : 0,
-      };
-    });
-  }
-
-  function getAvailableForPicker() {
-    const assignedIds = pickerMode === "block" ? blockListIds : allowListIds;
-    return allLists.filter((l) => !assignedIds.includes(l.id));
-  }
+  $: blockRows = assignedListRows(blockListIds, allLists);
+  $: allowRows = assignedListRows(allowListIds, allLists);
+  $: pickerLists = listsAvailableToAssign(
+    pickerMode,
+    allLists,
+    blockListIds,
+    allowListIds,
+  );
 
   async function saveBlockListIds() {
     try {
@@ -200,9 +191,10 @@
     }
   }
 
-  function openPicker(mode: "block" | "allow") {
+  async function openPicker(mode: "block" | "allow") {
     pickerMode = mode;
     showPicker = true;
+    await loadAllLists();
   }
 
   async function addListToPicker(listId: string) {
@@ -405,15 +397,23 @@
         : $_("Add to Allow Lists")}
     />
     <ModalBody>
-      {#if getAvailableForPicker().length === 0}
+      {#if pickerLists.length === 0}
         <p class="gs-empty" style="padding: 16px 0;">
-          {$_(
-            "No domain lists available. Create one on the Domain Lists page first.",
-          )}
+          {#if allLists.length === 0}
+            {$_(
+              "No domain lists available. Create one on the Domain Lists page first.",
+            )}
+          {:else if pickerMode === "allow"}
+            {$_(
+              "Every domain list is already on the Block List or the Allow List.",
+            )}
+          {:else}
+            {$_("Every domain list is already on the Block List.")}
+          {/if}
         </p>
       {:else}
         <div class="gs-row-list">
-          {#each getAvailableForPicker() as list (list.id)}
+          {#each pickerLists as list (list.id)}
             <div class="gs-row-item">
               <div class="dns-picker-info">
                 <span class="dns-picker-name">{list.name}</span>
@@ -433,6 +433,7 @@
                 </span>
               </div>
               <Button
+                type="button"
                 size="small"
                 kind="primary"
                 icon={AddAlt}
@@ -595,11 +596,11 @@
             Add
           </Button>
         </div>
-        {#if allowListIds.length === 0}
+        {#if allowRows.length === 0}
           <p class="gs-empty">No allow lists assigned.</p>
         {:else}
           <div class="gs-row-list">
-            {#each buildDisplayList(allowListIds) as item (item.id)}
+            {#each allowRows as item (item.id)}
               <div class="gs-row-item">
                 <div class="dns-row-info">
                   <span class="dns-row-name">{item.name}</span>
@@ -651,11 +652,11 @@
             Add
           </Button>
         </div>
-        {#if blockListIds.length === 0}
+        {#if blockRows.length === 0}
           <p class="gs-empty">No block lists assigned.</p>
         {:else}
           <div class="gs-row-list">
-            {#each buildDisplayList(blockListIds) as item (item.id)}
+            {#each blockRows as item (item.id)}
               <div class="gs-row-item">
                 <div class="dns-row-info">
                   <span class="dns-row-name">{item.name}</span>
