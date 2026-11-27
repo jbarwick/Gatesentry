@@ -383,7 +383,9 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 		CertCache.Put(serverName, serverAddr, cert, rt)
 	}
 	log.Println("[SSL] Setting up HTTP Server")
-	// Create TLS config for the handshake (not for the server)
+	// Server preference is h2, then http/1.1. A client that offers only
+	// http/1.1 (RFC 6455 WebSocket) still negotiates http/1.1. Do not invert
+	// this list: that disables HTTP/2 for every bumped browser.
 	tlsConfig := &tls.Config{
 		NextProtos:   []string{"h2", "http/1.1"},
 		Certificates: []tls.Certificate{cert, TLSCert},

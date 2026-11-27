@@ -617,11 +617,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("Upgrade") == "websocket" {
+	if isWebsocketUpgrade(r) {
 		Metrics.WebSocketTotal.Add(1)
 		Metrics.ActiveWebSocket.Add(1)
 		defer Metrics.ActiveWebSocket.Add(-1)
-		HandleWebsocketConnection(r, w)
+		h.HandleWebsocketConnection(r, w)
 		return
 	}
 

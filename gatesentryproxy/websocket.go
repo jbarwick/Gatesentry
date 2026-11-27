@@ -2,6 +2,8 @@ package gatesentryproxy
 
 import (
 	"bufio"
+	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -11,39 +13,154 @@ import (
 	"time"
 )
 
+// websocketDial is the TCP dialer used for WebSocket upstreams.
+// Tests replace this to assert the dialed address.
+var websocketDial = safeDialContext
+
+// tlsClientConfigForWebsocket builds the TLS config for WSS after SSL bump.
+// ALPN is http/1.1 only: this dial is about to write an HTTP/1.1 upgrade.
+// Tests replace this to trust a fixture CA.
+var tlsClientConfigForWebsocket = func(serverName string) *tls.Config {
+	return &tls.Config{
+		ServerName: serverName,
+		NextProtos: []string{"http/1.1"},
+	}
+}
+
+const websocketHandshakeTimeout = 10 * time.Second
+
+func isWebsocketUpgrade(r *http.Request) bool {
+	return r != nil && strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+}
+
+// websocketUpstreamAddr is the host:port we dial for a WebSocket upgrade.
+// After SSL bump the inner request Host often has no port; use the original
+// CONNECT port (connectPort), then 443 for bumped TLS, else 80.
+func websocketUpstreamAddr(host string, bumpedTLS bool, connectPort string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return host
+	}
+	port := connectPort
+	if port == "" {
+		if bumpedTLS {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// websocketHostHeader is the Host value sent upstream. A non-default port
+// that was taken from the CONNECT target is included. Port 443 (WSS) and
+// port 80 (WS) stay off the header when the client omitted them.
+func websocketHostHeader(requestHost, dialAddr string, bumpedTLS bool) string {
+	requestHost = strings.TrimSpace(requestHost)
+	if requestHost == "" {
+		return dialAddr
+	}
+	if _, _, err := net.SplitHostPort(requestHost); err == nil {
+		return requestHost
+	}
+	_, port, err := net.SplitHostPort(dialAddr)
+	if err != nil {
+		return requestHost
+	}
+	def := "80"
+	if bumpedTLS {
+		def = "443"
+	}
+	if port == def {
+		return requestHost
+	}
+	return net.JoinHostPort(requestHost, port)
+}
+
+func websocketServerName(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return host
+}
+
+func hopByHopHeader(key string) bool {
+	switch strings.ToLower(key) {
+	case "host", "connection", "keep-alive", "te", "trailer",
+		"transfer-encoding", "proxy-connection", "upgrade":
+		return true
+	default:
+		return strings.HasPrefix(strings.ToLower(key), "proxy-")
+	}
+}
+
+// connectionHopHeaders are the header names listed in Connection.
+// RFC 7230 treats those as hop-by-hop and they must not be forwarded.
+func connectionHopHeaders(h http.Header) map[string]bool {
+	out := map[string]bool{}
+	for _, line := range h.Values("Connection") {
+		for _, tok := range strings.Split(line, ",") {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
+			out[strings.ToLower(tok)] = true
+		}
+	}
+	return out
+}
+
+func closeWrite(c net.Conn) {
+	if tc, ok := c.(*net.TCPConn); ok {
+		tc.CloseWrite()
+		return
+	}
+	if tc, ok := c.(*tls.Conn); ok {
+		tc.CloseWrite()
+	}
+}
+
 // HandleWebsocketConnection upgrades an HTTP request to a bidirectional
-// WebSocket tunnel. The proxy acts as a transparent relay — it forwards
-// the client's upgrade request to the upstream server, relays the 101
-// Switching Protocols response back, and then copies data bidirectionally
-// until either side closes the connection.
-//
-// No content inspection is performed on WebSocket frames — they are
-// opaque to the proxy, same as CONNECT tunnel traffic.
-func HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
-	// Determine upstream address from the request URL
+// WebSocket tunnel. After SSL bump (h.TLS), the origin speaks TLS on the
+// CONNECT port; the relay dials TLS and forwards RFC 6455 headers including
+// Connection: Upgrade. Frame payloads are not inspected.
+func (h ProxyHandler) HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
 	host := r.Host
 	if host == "" {
 		host = r.URL.Host
 	}
-	if host == "" {
+	addr := websocketUpstreamAddr(host, h.TLS, h.connectPort)
+	if addr == "" {
 		http.Error(w, "Bad Request: missing host", http.StatusBadRequest)
 		return
 	}
 
-	// Default to port 80 for plain HTTP WebSocket connections
-	if !strings.Contains(host, ":") {
-		host = host + ":80"
-	}
-
-	// Connect to upstream
-	serverConn, err := safeDialContext(r.Context(), "tcp", host)
+	rawConn, err := websocketDial(r.Context(), "tcp", addr)
 	if err != nil {
-		log.Printf("[WebSocket] Failed to connect to upstream %s: %v", host, err)
+		log.Printf("[WebSocket] Failed to connect to upstream %s: %v", addr, err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
 
-	// Hijack the client connection
+	var serverConn net.Conn = rawConn
+	if h.TLS {
+		tlsConn := tls.Client(rawConn, tlsClientConfigForWebsocket(websocketServerName(addr)))
+		hsCtx, hsCancel := context.WithTimeout(r.Context(), websocketHandshakeTimeout)
+		err = tlsConn.HandshakeContext(hsCtx)
+		hsCancel()
+		if err != nil {
+			log.Printf("[WebSocket] TLS handshake with upstream %s: %v", addr, err)
+			rawConn.Close()
+			http.Error(w, "Bad Gateway", http.StatusBadGateway)
+			return
+		}
+		serverConn = tlsConn
+	}
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		log.Printf("[WebSocket] ResponseWriter does not support Hijack")
@@ -59,29 +176,27 @@ func HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
 		return
 	}
 
-	// Forward the original upgrade request to upstream.
-	// Reconstruct the HTTP request line and headers.
 	reqURI := r.URL.RequestURI()
+	if reqURI == "" {
+		reqURI = "/"
+	}
 	fmt.Fprintf(serverConn, "%s %s HTTP/1.1\r\n", r.Method, reqURI)
 
-	// Use the determined upstream host for the Host header
-	upstreamHost := r.Host
+	upstreamHost := websocketHostHeader(r.Host, addr, h.TLS)
 	if upstreamHost == "" {
-		upstreamHost = host // fallback to the dialed host
+		upstreamHost = host
 	}
 	fmt.Fprintf(serverConn, "Host: %s\r\n", upstreamHost)
+	fmt.Fprintf(serverConn, "Connection: Upgrade\r\n")
+	upgradeVal := r.Header.Get("Upgrade")
+	if upgradeVal == "" {
+		upgradeVal = "websocket"
+	}
+	fmt.Fprintf(serverConn, "Upgrade: %s\r\n", upgradeVal)
 
+	extraHop := connectionHopHeaders(r.Header)
 	for key, values := range r.Header {
-		// Filter out hop-by-hop and proxy-only headers (RFC 7230 §6.1)
-		keyLower := strings.ToLower(key)
-		if keyLower == "host" ||
-			keyLower == "connection" ||
-			keyLower == "keep-alive" ||
-			keyLower == "te" ||
-			keyLower == "trailer" ||
-			keyLower == "transfer-encoding" ||
-			keyLower == "proxy-connection" ||
-			strings.HasPrefix(keyLower, "proxy-") {
+		if hopByHopHeader(key) || extraHop[strings.ToLower(key)] {
 			continue
 		}
 		for _, v := range values {
@@ -90,7 +205,6 @@ func HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
 	}
 	fmt.Fprintf(serverConn, "\r\n")
 
-	// Read the upstream response (should be 101 Switching Protocols)
 	serverBuf := bufio.NewReader(serverConn)
 	upstreamResp, err := http.ReadResponse(serverBuf, r)
 	if err != nil {
@@ -100,7 +214,6 @@ func HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
 		return
 	}
 
-	// Forward the upstream response back to the client
 	if err := upstreamResp.Write(clientConn); err != nil {
 		log.Printf("[WebSocket] Failed to write response to client: %v", err)
 		clientConn.Close()
@@ -116,45 +229,33 @@ func HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
 	}
 
 	if DebugLogging {
-		log.Printf("[WebSocket] Tunnel established: %s → %s", r.RemoteAddr, host)
+		log.Printf("[WebSocket] Tunnel established: %s → %s", r.RemoteAddr, addr)
 	}
 
-	// Bidirectional copy — same pattern as ConnectDirect.
-	// If the serverBuf has buffered data from the upstream response,
-	// we need to drain it first.
 	var serverReader io.Reader = serverConn
 	if serverBuf.Buffered() > 0 {
 		serverReader = io.MultiReader(serverBuf, serverConn)
 	}
 
 	var clientReader io.Reader = clientConn
-	if clientBuf.Reader.Buffered() > 0 {
+	if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
 		clientReader = io.MultiReader(clientBuf, clientConn)
 	}
 
 	done := make(chan struct{}, 2)
 
-	// Server → Client
 	go func() {
 		io.Copy(clientConn, serverReader)
-		// Graceful half-close if the underlying connection supports it
-		if tc, ok := clientConn.(*net.TCPConn); ok {
-			tc.CloseWrite()
-		}
+		closeWrite(clientConn)
 		done <- struct{}{}
 	}()
 
-	// Client → Server
 	go func() {
 		io.Copy(serverConn, clientReader)
-		if tc, ok := serverConn.(*net.TCPConn); ok {
-			tc.CloseWrite()
-		}
+		closeWrite(serverConn)
 		done <- struct{}{}
 	}()
 
-	// Wait for one direction to finish, then set a deadline on both
-	// to allow the other direction to drain gracefully.
 	<-done
 	clientConn.SetDeadline(time.Now().Add(5 * time.Second))
 	serverConn.SetDeadline(time.Now().Add(5 * time.Second))
@@ -164,6 +265,6 @@ func HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
 	serverConn.Close()
 
 	if DebugLogging {
-		log.Printf("[WebSocket] Tunnel closed: %s → %s", r.RemoteAddr, host)
+		log.Printf("[WebSocket] Tunnel closed: %s → %s", r.RemoteAddr, addr)
 	}
 }

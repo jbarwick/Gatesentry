@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## v2.0.0-beta.28 (27 November 2026)
+
+- SSL bump: a WebSocket upgrade dials TLS on the original CONNECT port (not port 80) and sends RFC 6455 `Connection: Upgrade`. Cleartext `ws://` is unchanged. HTTP/2 stays the preferred ALPN for ordinary HTTPS.
+
+## v2.0.0-beta.27 (5 November 2026)
+
+- Test Domain and live DNS queries use the same filter decision (`decideDomainFilter`)
+
+## v2.0.0-beta.26 (5 November 2026)
+
+- Domain-list lookups read a published snapshot. A list refresh does not stall DNS queries or Test Domain
+
+## v2.0.0-beta.25 (5 November 2026)
+
+- Domain-list index is sharded so a lookup does not take the lock that inserts a whole list
+
+## v2.0.0-beta.24 (5 November 2026)
+
+- DNS page: Test Domain card. An Allow List match, including a parent zone, is an automatic allow
+
+## v2.0.0-beta.23 (5 November 2026)
+
+- DNS Block and Allow cards update as soon as a list is assigned
+- The Allow dialog hides lists already on the Block List
+
+## v2.0.0-beta.22 (5 November 2026)
+
+- Domain Totals counts unique domains on the enabled block lists only
+
 ## v2.0.0-beta.21 (21 September 2026)
 
 - Stats: 7-day chart is hourly; 24h/1h rebucket the same compact series in the browser
